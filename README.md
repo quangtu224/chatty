@@ -26,7 +26,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The first visit opens the sample workspace. No environment variables, database or API keys are required for this release.
+Open the URL printed by Vite. The app asks the server for an existing session (`GET /api/v1/me`) and otherwise shows sign-in; **Try demo** opens the sample workspace without a server, database or API keys.
 
 | Command | Purpose |
 | --- | --- |
@@ -55,9 +55,9 @@ Once Docker Desktop is running, start local PostgreSQL with `docker compose up -
 5. Open **Group details** to compare owner and regular-member controls.
 6. Edit your profile or switch themes from the sidebar.
 
-Select **Sign out** to view authentication. Sign-in accepts a valid email and a non-empty password. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. An email containing `error` simulates failure. **Try demo** returns to the workspace. Credentials are not saved or sent; use sample values rather than real credentials.
+Sign-in and sign-up call the Chatty server (server routes are still being implemented in M1, so they fail with a "couldn’t reach the server" message until then). Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. A signed-in account sees an empty conversation list and no Demo controls; real conversations arrive in M2. **Try demo** never contacts the server.
 
-Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Current sign-out changes the local session but does not clear all conversations. Avoid entering sensitive information.
+Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Demo sign-out returns to sign-in but keeps demo conversations; live sign-out ends the server session. Avoid entering sensitive information.
 
 ## Stack
 

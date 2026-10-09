@@ -122,50 +122,144 @@ export const SQL = {
   bumpSeq: `UPDATE chatty.conversations SET next_seq = next_seq + 1 WHERE id = $1`,
 };
 
-// TODO(M2a): DB row -> message shape above. `prefix` reads prefixed columns, e.g.
-// toMessage(row, "last_") for SQL.listConversations (row.last_id, row.last_body, ...).
+// DB row -> API message. `prefix` reads prefixed columns, e.g. toMessage(row, "last_")
+// for SQL.listConversations (row.last_id, row.last_body, ...). Returns null when the
+// row has no message (a conversation without messages yet).
 export function toMessage(row, prefix = "") {
-  throw new Error("TODO: toMessage");
+  const id = row[`${prefix}id`];
+  if (!id) return null;
+  return {
+    id,
+    conversationId: row[`${prefix}conversation_id`],
+    clientMessageId: row[`${prefix}client_message_id`],
+    senderId: row[`${prefix}sender_id`],
+    seq: row[`${prefix}seq`],
+    kind: row[`${prefix}kind`],
+    body: row[`${prefix}body`],
+    gifId: row[`${prefix}gif_id`],
+    // pg returns timestamptz as a Date; ISO strings are always UTC ("...Z").
+    createdAt: row[`${prefix}created_at`].toISOString(),
+  };
 }
 
-// TODO(M2a): run SQL.listConversations with [userId, conversationId] and map each row to
-// { id: row.conversation_id, type: "direct", peer: toUser(row),
-//   lastMessage: row.last_id ? toMessage(row, "last_") : null }.
+// Conversations visible to userId: all of them, or only conversationId when given.
 async function listConversations(db, userId, conversationId = null) {
-  throw new Error("TODO: listConversations");
+  const { rows } = await db.query(SQL.listConversations, [userId, conversationId]);
+  return rows.map((row) => ({
+    id: row.conversation_id,
+    type: "direct",
+    peer: toUser(row),
+    lastMessage: toMessage(row, "last_"),
+  }));
+}
+
+// PostgreSQL integer limit; a larger beforeSeq would make the query itself fail (500).
+const MAX_SEQ = 2_147_483_647;
+
+// Strict positive-integer parser for query strings: "12" -> 12; "1.5", "-3", "0x10",
+// "abc", arrays (?a=1&a=2) and out-of-range values -> null.
+function positiveInt(value) {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
+  const n = Number(value);
+  return n <= MAX_SEQ ? n : null;
 }
 
 export function conversationRoutes({ pool, auth, sendLimit }) {
   const router = express.Router();
+  // Every conversation route needs a signed-in user (sets req.user).
   router.use("/conversations", auth);
 
-  // TODO(M2a): validate userId (UUID, not your own id). Lowercase it first: clients may
-  // send uppercase UUIDs, but the direct_key check only accepts lowercase.
-  // direct_key = [me, other].sort().join(":"). In one withTransaction:
-  //   SQL.userExists (no row -> 404) -> SQL.insertDirect -> got a row? SQL.insertMembers (201)
-  //   : SQL.findDirect (200). Respond with (await listConversations(db, me, id))[0].
+  // One response for "does not exist" and "not yours", so outsiders cannot probe ids.
+  const notFound = (req, res) =>
+    sendError(req, res, 404, "not_found", "Conversation not found.");
+  const invalid = (req, res, fieldErrors) =>
+    sendError(req, res, 400, "validation_failed", "Check the highlighted fields.", fieldErrors);
+
+  // Open (or create) the direct chat between the caller and req.body.userId.
   router.post("/conversations/direct", async (req, res) => {
-    throw new Error("TODO: POST /conversations/direct");
+    const me = req.user.id;
+    const raw = req.body?.userId;
+    // Lowercase: clients may send uppercase UUIDs, but direct_key only accepts lowercase.
+    const other = typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
+    if (!other) return invalid(req, res, { userId: "Choose a teammate." });
+    if (other === me) return invalid(req, res, { userId: "You can’t start a chat with yourself." });
+
+    // Sorting makes A->B and B->A produce the same key (the unique constraint does the rest).
+    const directKey = [me, other].sort().join(":");
+    const result = await withTransaction(pool, async (db) => {
+      if (!(await db.query(SQL.userExists, [other])).rowCount) return null;
+      const inserted = await db.query(SQL.insertDirect, [directKey]);
+      let id;
+      if (inserted.rowCount) {
+        // This request created the chat, so it also adds both members.
+        id = inserted.rows[0].id;
+        await db.query(SQL.insertMembers, [id, me, other]);
+      } else {
+        // The pair already had a chat (maybe created a moment ago by a parallel request).
+        id = (await db.query(SQL.findDirect, [directKey])).rows[0].id;
+      }
+      const [conversation] = await listConversations(db, me, id);
+      return { conversation, created: inserted.rowCount === 1 };
+    });
+    if (!result) return sendError(req, res, 404, "not_found", "That teammate doesn’t exist.");
+    res.status(result.created ? 201 : 200).json({ conversation: result.conversation });
   });
 
   router.get("/conversations", async (req, res) => {
-    throw new Error("TODO: GET /conversations");
+    res.json({ conversations: await listConversations(pool, req.user.id) });
   });
 
-  // TODO(M2a): non-UUID id -> 404; beforeSeq must be a positive integer or absent (null);
-  // clamp limit. SQL.isMember (no row -> 404), then SQL.history with limit + 1:
-  // more rows than limit means hasMore; drop the extra one and reverse to ascending.
+  // One page of history. Without beforeSeq: the latest page. Always ascending by seq.
   router.get("/conversations/:id/messages", async (req, res) => {
-    throw new Error("TODO: GET /conversations/:id/messages");
+    const { id } = req.params;
+    // Checked before any query: PostgreSQL would reject a malformed uuid with a 500.
+    if (!UUID.test(id)) return notFound(req, res);
+
+    let beforeSeq = null;
+    if (req.query.beforeSeq !== undefined) {
+      beforeSeq = positiveInt(req.query.beforeSeq);
+      if (beforeSeq === null)
+        return invalid(req, res, { beforeSeq: "Use a positive whole number." });
+    }
+    // Lenient like /users: a bad or missing limit falls back to 30; range is 1–50.
+    const limit = Math.min(Math.max(positiveInt(req.query.limit) ?? 30, 1), 50);
+
+    if (!(await pool.query(SQL.isMember, [id, req.user.id])).rowCount) return notFound(req, res);
+    // Fetch one extra row: if it exists, an older page exists too.
+    const { rows } = await pool.query(SQL.history, [id, beforeSeq, limit + 1]);
+    const hasMore = rows.length > limit;
+    const messages = rows.slice(0, limit).reverse().map((row) => toMessage(row));
+    res.json({ messages, hasMore });
   });
 
-  // TODO(M2a): non-UUID id -> 404; validate clientMessageId (UUID) and
-  // messageBodyError(body). Then in one withTransaction:
-  //   1. SQL.lockForSend   no row -> 404
-  //   2. SQL.findSent      row -> 200 with that message (the original body is kept)
-  //   3. SQL.insertMessage (seq = next_seq) + SQL.bumpSeq -> 201
+  // Send a text message. The response is the acknowledgement: 201 new, 200 duplicate retry.
   router.post("/conversations/:id/messages", sendLimit, async (req, res) => {
-    throw new Error("TODO: POST /conversations/:id/messages");
+    const { id } = req.params;
+    if (!UUID.test(id)) return notFound(req, res);
+    const { clientMessageId, body } = req.body ?? {};
+    const fieldErrors = {};
+    if (typeof clientMessageId !== "string" || !UUID.test(clientMessageId))
+      fieldErrors.clientMessageId = "Missing message id. Refresh and try again.";
+    const bodyError = messageBodyError(body);
+    if (bodyError) fieldErrors.body = bodyError;
+    if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
+
+    const me = req.user.id;
+    const result = await withTransaction(pool, async (db) => {
+      // 1. Lock the conversation row (and prove membership). Parallel sends wait here.
+      const locked = await db.query(SQL.lockForSend, [id, me]);
+      if (!locked.rowCount) return null;
+      // 2. A retry of an already stored message returns the original, unchanged.
+      const existing = await db.query(SQL.findSent, [id, me, clientMessageId]);
+      if (existing.rowCount) return { row: existing.rows[0], created: false };
+      // 3. New message: take the next seq and advance the counter in the same transaction.
+      const { next_seq: seq } = locked.rows[0];
+      const inserted = await db.query(SQL.insertMessage, [id, me, clientMessageId, seq, body]);
+      await db.query(SQL.bumpSeq, [id]);
+      return { row: inserted.rows[0], created: true };
+    });
+    if (!result) return notFound(req, res);
+    res.status(result.created ? 201 : 200).json({ message: toMessage(result.row) });
   });
 
   return router;

@@ -36,13 +36,13 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run preview` | Preview the built frontend locally |
 | `npm run server` | Start the server shell; auth/profile routes are still pending |
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
-| `npm run test:server` | M1 PostgreSQL integration tests (currently red on stubs) |
+| `npm run test:server` | M1 PostgreSQL integration tests (needs `docker compose up -d db`) |
 
 There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. HTTP error handling and shutdown are implemented, but application routes are not yet complete.
 
 ### M1 development status
 
-Identity/session tables and tracked migrations are implemented. Schema constraints, migration repeatability and rollback have been checked with an isolated embedded PostgreSQL engine; a Docker/PostgreSQL network integration run is still pending. Shared validation, HTTP error handling and server shutdown are checked locally. The browser REST client implements JSON requests, cached CSRF tokens with one refresh, structured errors and empty responses. Live auth routes and connecting the client to the UI remain incomplete. This is not a tested full-stack release.
+M1 is implemented: email/password accounts with public handles, Argon2id hashing, seven-day cookie sessions, CSRF protection, rate-limited auth, profile updates, teammate search and health checks. On 2026-10-09 the 18 PostgreSQL integration tests passed against Docker PostgreSQL 17, and sign-up, reload, profile save, sign-out and sign-in were checked in a browser against the real server. Conversations are still demo-only until M2. Run `npm run db:migrate` once, then `npm run server` alongside `npm run dev`.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -55,7 +55,7 @@ Once Docker Desktop is running, start local PostgreSQL with `docker compose up -
 5. Open **Group details** to compare owner and regular-member controls.
 6. Edit your profile or switch themes from the sidebar.
 
-Sign-in and sign-up call the Chatty server (server routes are still being implemented in M1, so they fail with a "couldn’t reach the server" message until then). Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. A signed-in account sees an empty conversation list and no Demo controls; real conversations arrive in M2. **Try demo** never contacts the server.
+Sign-in and sign-up call the Chatty server; without a running server they show a "couldn’t reach the server" message. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. A signed-in account sees an empty conversation list and no Demo controls; real conversations arrive in M2. **Try demo** never contacts the server.
 
 Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Demo sign-out returns to sign-in but keeps demo conversations; live sign-out ends the server session. Avoid entering sensitive information.
 
@@ -67,9 +67,9 @@ Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores sam
 | Tooling | Vite 6, npm lockfile | Add linting and CI |
 | Icons/avatars | Lucide React, local SVG assets | Reuse existing assets |
 | Data | Mock fixtures and localStorage | Supabase-hosted PostgreSQL |
-| Server | Express/pg installed; TODO scaffold | Node.js, Express, Socket.IO |
+| Server | Express + pg: auth, profile, user search, health | Add Socket.IO messaging |
 | Auth | Local simulation | Server-managed cookie sessions |
-| Verification | Nine model tests and M1 integration test scaffold, currently red | Passing database/browser tests |
+| Verification | Local model tests and PostgreSQL integration tests (not published) | Multi-user browser tests |
 | Delivery | Local build | Docker, GitHub Actions CI/CD |
 
 The proposed backend uses Supabase as managed PostgreSQL. Supabase Auth and Realtime are not part of this architecture; Express and Socket.IO own those responsibilities. This is a proposal, not a shipped feature.
@@ -92,7 +92,7 @@ chatty/
     styles.css               Theme tokens and responsive layout
     main.jsx                 Entry point
   docs/IMPLEMENTATION_SPEC.md Full-stack requirements and delivery gates
-  server/                    M1 server/migration TODOs and integration tests
+  server/                    Express app, auth, migrations
   docker/init-test-db.sql     Local test database initialization
   docker-compose.yml         Local PostgreSQL service
   .env.example               Local configuration examples

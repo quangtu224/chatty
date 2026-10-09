@@ -2,25 +2,37 @@ import { useState } from "react";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 import { Brand, Avatar } from "./UI.jsx";
 import { validateAuth } from "../model.js";
-export default function Auth({ onEnter }) {
+import { login, register } from "../services/api.js";
+export default function Auth({ onLive, onDemo }) {
   const [signup, setSignup] = useState(false),
     [fields, setFields] = useState({ name: "", handle: "", email: "", password: "" }),
     [errors, setErrors] = useState({}),
     [busy, setBusy] = useState(false);
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault();
     const next = validateAuth(fields, signup);
     setErrors(next);
     if (Object.keys(next).length) return;
     setBusy(true);
-    setTimeout(() => {
+    try {
+      const { email, password, name, handle } = fields;
+      const { user } = signup
+        ? await register({ email, password, displayName: name, handle })
+        : await login({ email, password });
+      onLive(user);
+    } catch (err) {
       setBusy(false);
-      if (fields.email.toLowerCase().includes("error"))
-        setErrors({
-          form: "We couldn’t sign you in. Try again, or enter the demo.",
-        });
-      else onEnter(signup ? fields.name.trim() : null);
-    }, 800);
+      const { displayName, ...rest } = err.fieldErrors ?? {};
+      setErrors(
+        err.code === "validation_failed" || err.code === "already_exists"
+          ? { ...rest, ...(displayName && { name: displayName }) }
+          : {
+              form: err.status < 500
+                ? err.message
+                : "We couldn’t reach the server. Try again, or enter the demo.",
+            },
+      );
+    }
   }
   return (
     <main className="auth-screen">
@@ -142,7 +154,7 @@ export default function Auth({ onEnter }) {
           <button
             type="button"
             className="btn btn-outline-secondary"
-            onClick={() => onEnter(null)}
+            onClick={onDemo}
           >
             Try demo <ArrowRight size={16} />
           </button>
@@ -160,9 +172,9 @@ export default function Auth({ onEnter }) {
             </button>
           </p>
           <div className="auth-disclosure">
-            This is a local frontend demo. Sign in with a valid email and any
-            non-empty password. Sign up with a 3–24 character lowercase handle
-            and a 10–128 character password. Nothing is sent to a server.
+            Accounts are stored on the Chatty server. Sign up with a 3–24
+            character lowercase handle and a 10–128 character password. Try
+            demo uses sample data in this browser and sends nothing.
           </div>
         </form>
       </section>

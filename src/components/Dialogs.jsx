@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Modal, Avatar } from "./UI.jsx";
 import { people } from "../data.js";
+import { AVATARS } from "../model.js";
 export function ConversationDialog({ onClose, onDirect, onGroup }) {
   const [tab, setTab] = useState("direct"),
     [search, setSearch] = useState(""),
@@ -160,7 +161,7 @@ export function ProfileDialog({ profile, onSave, onClose, theme, onTheme }) {
       <div className="field">
         Choose your little companion
         <div className="avatar-picker">
-          {["cat", "fox", "raccoon", "owl", "frog", "bear"].map((a) => (
+          {AVATARS.map((a) => (
             <button
               key={a}
               className={avatar === a ? "active" : ""}
@@ -195,7 +196,10 @@ export function ProfileDialog({ profile, onSave, onClose, theme, onTheme }) {
           className="btn btn-primary"
           onClick={() => {
             if (!name.trim()) setError("Please enter your display name.");
-            else onSave({ name: name.trim(), avatar });
+            else
+              Promise.resolve(onSave({ name: name.trim(), avatar })).catch(
+                (err) => setError(err.message),
+              );
           }}
         >
           Save changes

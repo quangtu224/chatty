@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Date: 2026-10-09. Status: M1 scaffold and failing tests exist; backend implementation/live UI integration are incomplete.
+Date: 2026-10-09. Status: M1 identity/database implemented and verified on 2026-10-09; M2 not started.
 
 ## 1. Outcome and constraints
 
@@ -33,7 +33,7 @@ Retain email/password login to match the implemented UI, superseding the earlier
 
 Add a public unique handle at signup: lowercase ASCII letters/digits/underscore, 3–24 characters. Search handle/display name with bounded paginated results. Display name: 1–40 characters, trimmed. Profile avatar allowlist: cat, fox, raccoon, owl, frog, bear.
 
-Signup passwords: 10–128 characters, never trimmed. Login validation requires a non-empty password, not the current signup minimum. Shared model validation, signup handle input and hints are implemented locally; live auth remains incomplete. Use generic login errors. Email verification/account recovery are excluded; this is a portfolio demo, not an identity-assurance service.
+Signup passwords: 10–128 characters, never trimmed. Login validation requires a non-empty password, not the current signup minimum. Implemented in M1 with shared client/server validation. Use generic login errors. Email verification/account recovery are excluded; this is a portfolio demo, not an identity-assurance service.
 
 ### Conversations and permissions
 
@@ -81,7 +81,7 @@ React -- REST / Socket.IO --> Express -- parameterized SQL --> PostgreSQL
 
 Use Supabase only as managed PostgreSQL; no Supabase Auth/Realtime or parallel transports. Use Express, Socket.IO, `pg` and SQL migrations, without an initial ORM. Share services across transports. Express serves frontend build and API/socket on one origin; Vite proxies locally. Add `server/` without moving the root frontend into a monorepo.
 
-Target file responsibilities: M1 already has TODO outlines for app/index/db/auth/migrate, the initial SQL file and browser API client. Create remaining files only when needed.
+Target file responsibilities: M1 files exist (app/index/db/auth/migrate, 001_initial.sql, api.js). Create remaining files only when needed.
 
 | Path | Responsibility |
 | --- | --- |
@@ -189,7 +189,7 @@ Retain Node's model test runner. Add real PostgreSQL integration tests and Playw
 
 ## 10. Milestones
 
-- [ ] **M1: Identity/database.** Server, migrations/config, real email auth/public handles, CSRF/session/profile; integrate App/Auth/model. Gate: auth security/migration tests.
+- [x] **M1: Identity/database.** Server, migrations/config, real email auth/public handles, CSRF/session/profile; integrate App/Auth/model. Gate: auth security/migration tests.
 - [ ] **M2: Durable direct chat.** Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate: two-user, concurrent retry and GIF proxy/validation tests.
 - [ ] **M3: Groups/read state.** Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
 - [ ] **M4: Recovery/polish.** Catch-up/gaps, fetch races, mock isolation, logout cleanup, responsive/accessibility. Gate: multi-page offline tests.

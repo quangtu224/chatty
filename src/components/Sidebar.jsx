@@ -40,9 +40,11 @@ export default function Sidebar({
           />
           <kbd>/</kbd>
         </div>
-        <button className="btn btn-primary new-button" onClick={onNew}>
-          <Plus size={18} /> New conversation
-        </button>
+        {onNew && (
+          <button className="btn btn-primary new-button" onClick={onNew}>
+            <Plus size={18} /> New conversation
+          </button>
+        )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
         {["group", "direct"].map((type) => (
@@ -105,9 +107,11 @@ export default function Sidebar({
         )}
       </nav>
       <div className="sidebar-footer">
-        <button className="demo-link" onClick={onDemo}>
-          <FlaskConical size={15} /> Demo controls <span>Local prototype</span>
-        </button>
+        {onDemo && (
+          <button className="demo-link" onClick={onDemo}>
+            <FlaskConical size={15} /> Demo controls <span>Local prototype</span>
+          </button>
+        )}
         <div className="profile-bar">
           <button className="profile-button" onClick={onProfile}>
             <Avatar name={profile.avatar} />

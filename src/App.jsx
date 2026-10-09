@@ -13,6 +13,7 @@ import {
 } from "./components/Dialogs.jsx";
 import { initialConversations, people, olderMessages } from "./data.js";
 import { readStorage, saveStorage, updateStatus } from "./model.js";
+import { getMe, logout, updateMe } from "./services/api.js";
 export default function App() {
   const [chats, setChats] = useState(() =>
     readStorage("chatty.chats.v1", initialConversations).map((c) => ({
@@ -32,9 +33,9 @@ export default function App() {
   const [drafts, setDrafts] = useState(() =>
     readStorage("chatty.drafts.v1", {}),
   );
-  const [authenticated, setAuthenticated] = useState(() =>
-    readStorage("chatty.session.v1", true),
-  );
+  // "checking" until GET /me answers; "live" = server session, "demo" = local fixtures.
+  const [mode, setMode] = useState("checking"),
+    [user, setUser] = useState(null);
   const [active, setActive] = useState("workshop"),
     [mobileChat, setMobileChat] = useState(false),
     [search, setSearch] = useState(""),
@@ -47,7 +48,13 @@ export default function App() {
     [loadingOlder, setLoadingOlder] = useState(false),
     [toast, setToast] = useState("");
   const timers = useRef(new Set());
-  const chat = chats.find((c) => c.id === active);
+  const live = mode === "live";
+  // Live conversations arrive in M2; fixtures never appear as live data.
+  const shownChats = live ? [] : chats;
+  const shownProfile = live
+    ? { name: user.displayName, avatar: user.avatarId }
+    : profile;
+  const chat = shownChats.find((c) => c.id === active);
   function later(fn, delay) {
     const id = setTimeout(() => {
       timers.current.delete(id);
@@ -70,10 +77,15 @@ export default function App() {
   useEffect(() => saveStorage("chatty.chats.v1", chats), [chats]);
   useEffect(() => saveStorage("chatty.drafts.v1", drafts), [drafts]);
   useEffect(() => saveStorage("chatty.profile.v1", profile), [profile]);
-  useEffect(
-    () => saveStorage("chatty.session.v1", authenticated),
-    [authenticated],
-  );
+  useEffect(() => {
+    getMe().then(
+      ({ user }) => {
+        setUser(user);
+        setMode("live");
+      },
+      () => setMode("auth"),
+    );
+  }, []);
   useEffect(() => {
     function shortcut(e) {
       if (
@@ -101,8 +113,8 @@ export default function App() {
       window.removeEventListener("online", online);
     };
   }, []);
-  function notify(text) {
-    setToast(text);
+  function notify(text, icon = "✓") {
+    setToast(`${icon} ${text}`);
     later(() => setToast(""), 2800);
   }
   function select(id) {
@@ -251,12 +263,17 @@ export default function App() {
       },
     });
   }
-  if (!authenticated)
+  if (mode === "checking") return null;
+  if (mode === "auth")
     return (
       <Auth
-        onEnter={(name) => {
-          if (name) setProfile((p) => ({ ...p, name }));
-          setAuthenticated(true);
+        onLive={(u) => {
+          setUser(u);
+          setMode("live");
+          setActive(null);
+        }}
+        onDemo={() => {
+          setMode("demo");
           setLoading(true);
           later(() => setLoading(false), 600);
         }}
@@ -265,21 +282,29 @@ export default function App() {
   return (
     <div className={`workspace ${mobileChat ? "show-chat" : ""}`}>
       <Sidebar
-        chats={chats}
+        chats={shownChats}
         active={active}
         onSelect={select}
         search={search}
         setSearch={setSearch}
-        onNew={() => setModal("new")}
-        profile={profile}
+        onNew={live ? undefined : () => setModal("new")}
+        profile={shownProfile}
         theme={theme}
         onTheme={themeToggle}
         onProfile={() => setModal("profile")}
-        onLogout={() => {
-          setAuthenticated(false);
+        onLogout={async () => {
+          if (live) {
+            try {
+              await logout();
+            } catch {
+              return notify("We couldn’t sign you out. Try again.", "!");
+            }
+            setUser(null);
+          }
           setModal(null);
+          setMode("auth");
         }}
-        onDemo={() => setModal("demo")}
+        onDemo={live ? undefined : () => setModal("demo")}
       />
       {loading ? (
         <main className="chat-main loading-screen">
@@ -295,7 +320,7 @@ export default function App() {
         <Chat
           visible={mobileChat}
           chat={chat}
-          profile={profile}
+          profile={shownProfile}
           draft={drafts[active] || ""}
           onDraft={(value) => setDrafts((d) => ({ ...d, [active]: value }))}
           onSend={send}
@@ -319,9 +344,13 @@ export default function App() {
       )}{" "}
       {modal === "profile" && (
         <ProfileDialog
-          profile={profile}
-          onSave={(p) => {
-            setProfile(p);
+          profile={shownProfile}
+          onSave={async (p) => {
+            if (live)
+              setUser(
+                (await updateMe({ displayName: p.name, avatarId: p.avatar })).user,
+              );
+            else setProfile(p);
             setModal(null);
             notify("Looking good. Profile updated.");
           }}
@@ -421,7 +450,7 @@ export default function App() {
       )}{" "}
       {toast && (
         <div className="toast-message" role="status">
-          ✓ {toast}
+          {toast}
         </div>
       )}
     </div>

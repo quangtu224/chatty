@@ -1,0 +1,28 @@
+-- Fails on purpose so migrate.js never records this skeleton as applied; delete when done.
+SELECT 'TODO: write 002_direct_chat.sql'::int;
+
+-- TODO(M2a): direct conversations and durable messages. M3 adds group columns.
+--
+-- chatty.conversations
+--   id uuid PK default gen_random_uuid()
+--   direct_key text not null unique   ("<smaller uuid>:<larger uuid>")
+--   next_seq integer not null default 1, CHECK > 0
+--   created_at timestamptz not null default now()
+--
+-- chatty.conversation_members
+--   conversation_id uuid FK -> conversations, user_id uuid FK -> users
+--   joined_at timestamptz not null default now()
+--   last_read_seq integer not null default 0   (used from M3)
+--   PRIMARY KEY (conversation_id, user_id); index (user_id, conversation_id)
+--
+-- chatty.messages
+--   id uuid PK default gen_random_uuid()
+--   conversation_id uuid FK, sender_id uuid FK -> users
+--   client_message_id uuid not null, seq integer not null
+--   kind text not null default 'text', CHECK in ('text', 'gif')
+--   body text not null, CHECK 1–4000 code points (char_length) and body ~ '\S'
+--   gif_id text, CHECK (kind = 'gif') = (gif_id IS NOT NULL) and gif_id ~ '^[A-Za-z0-9]+$'
+--   created_at timestamptz not null default now()
+--   UNIQUE (conversation_id, seq); UNIQUE (conversation_id, sender_id, client_message_id)
+--
+-- REVOKE ALL on the three tables FROM PUBLIC, like 001.

@@ -36,6 +36,16 @@ export async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
+export function toUser(row, withEmail = false) {
+  const user = {
+    id: row.id,
+    handle: row.handle,
+    displayName: row.display_name,
+    avatarId: row.avatar_id,
+  };
+  return withEmail ? { ...user, email: row.email } : user;
+}
+
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest();
 
 export async function createSession(db, userId) {

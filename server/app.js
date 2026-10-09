@@ -12,23 +12,15 @@ import {
   rateLimit,
   requireUser,
   sendError,
+  toUser,
   verifyPassword,
 } from "./auth.js";
+import { conversationRoutes } from "./conversations.js";
 import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
-
-function toUser(row, withEmail = false) {
-  const user = {
-    id: row.id,
-    handle: row.handle,
-    displayName: row.display_name,
-    avatarId: row.avatar_id,
-  };
-  return withEmail ? { ...user, email: row.email } : user;
-}
 
 const renameKeys = (errors, names) =>
   Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
@@ -60,6 +52,7 @@ export function createApp({
   pool,
   appOrigin,
   authRateLimit = { windowMs: 15 * 60_000, max: 10 },
+  sendRateLimit = { windowMs: 10_000, max: 30 },
   secureCookies = false,
 }) {
   const app = express();
@@ -196,6 +189,8 @@ export function createApp({
       nextCursor: rows.length > limit ? page.at(-1).handle : null,
     });
   });
+
+  v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit) }));
 
   app.use("/api/v1", v1);
   app.use("/api", (req, res) => {

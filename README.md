@@ -2,57 +2,121 @@
 
 A calm chat workspace for small teams, with a developer-friendly interface and original pixel-art avatars.
 
-This baseline is an interactive frontend prototype. Real accounts, database persistence, server authorization and remote messaging are planned, not implemented.
+Chatty is a full-stack portfolio project in progress. **The current release is an interactive frontend prototype.** Real accounts, server authorization, database persistence and cross-device messaging are not implemented yet.
+
+## Current features
+
+- Responsive direct and group conversation views.
+- Conversation and teammate search over sample data.
+- Local message composition, multiline input, sending/failed states and retry.
+- Earlier-message fixtures, scroll preservation and Jump to latest.
+- Local group creation and member management with confirmation dialogs.
+- Profile editing, pixel avatars and light/dark themes.
+- Demo controls for loading, typing, offline/reconnecting and message failure.
+- Browser persistence for demo conversations, drafts, profile and theme.
+
+Authentication, unread counts, presence, typing, delivery, pagination and group permissions are simulated. The demo is not a secure messaging service.
 
 ## Quick start
 
-Use Node.js 22 LTS or a newer supported release and npm. From this directory:
+Use Node.js 24.7 or newer and npm, matching `package.json`. Planned password hashing uses Node's built-in Argon2 API. Run from the directory containing this README:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open Vite's printed URL. No database, environment variables or API key is needed.
+Open the URL printed by Vite. The first visit opens the sample workspace. No environment variables, database or API keys are required for this release.
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start the frontend |
-| `npm test` | Run two model tests |
-| `npm run build` | Build the frontend into dist/ |
-| `npm run preview` | Preview the built frontend |
+| `npm run dev` | Start Vite locally |
+| `npm test` | Run model tests with Node's test runner (test files are kept private) |
+| `npm run build` | Build the static frontend into `dist/` |
+| `npm run preview` | Preview the built frontend locally |
+| `npm run server` | M1 server entry point (TODO scaffold) |
+| `npm run db:migrate` | Migration entry point (TODO scaffold) |
+| `npm run test:server` | M1 PostgreSQL integration tests (currently red on stubs) |
 
-## Features
+There is no lint, app-container or deployment script yet. Server/migration commands exist but are incomplete; their successful exit does not prove that a server started or migrations ran.
 
-- Responsive direct/group chat views, conversation search and teammate picker.
-- Local message composition, multiline input, sending/failed states and retry.
-- Sample history pagination, scroll preservation and Jump to latest.
-- Local group/member management, profile editing, pixel avatars and light/dark themes.
-- Demo controls for loading, typing, network failure and retry.
-- Browser persistence of demo conversations, drafts, profile and theme.
+### M1 development status
 
-The first visit opens the sample workspace. Select **Sign out** for auth screens. Any valid email and password of eight or more characters passes local validation; an email containing `error` simulates failure. **Try demo** returns to the workspace. Credentials are not saved or sent; use sample values.
+Backend outlines, an initial migration outline, an API client outline and failing acceptance tests exist. Live auth is not connected to the UI. On 2026-10-09, **1 of 9 model tests passes**; the other eight remain red on validation TODOs. Frontend build succeeds with a bundle-size warning. This is not a tested full-stack release.
 
-Send with Enter, Shift+Enter for a newline. **Reset demo data** restores samples and drafts after confirmation, preserving theme. State lives under `chatty.*.v1` localStorage keys; sign-out does not clear all local data. Do not enter private information.
+Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
-## Source structure
+## Exploring the demo
 
-- `src/App.jsx`: local state and prototype interactions.
-- `src/components/`: Auth, Chat, Sidebar, dialogs and shared UI primitives.
-- `src/model.js` and `src/model.test.js`: validation, storage, retry updates and tests.
-- `src/data.js`: mock people/history needed for the public demo.
-- `src/styles.css`: responsive layout and theme tokens.
-- `public/avatars/`: runtime pixel-art SVGs.
-- `docs/IMPLEMENTATION_SPEC.md`: proposed full-stack requirements.
+1. Select a conversation or use **New conversation** to start a local chat.
+2. Send with Enter; use Shift+Enter for a newline. Input composition is supported.
+3. In **Demo controls**, enable **Fail the next message**, send, then retry.
+4. Load earlier messages and use **Jump to latest** after scrolling upward.
+5. Open **Group details** to compare owner and regular-member controls.
+6. Edit your profile or switch themes from the sidebar.
 
-Runtime stack: React 19, JavaScript, Bootstrap 5 and Lucide React; Vite 6 for builds. Optional Google Fonts have system-font fallbacks.
+Select **Sign out** to view authentication. Any syntactically valid email and a password of at least eight characters passes local validation; an email containing `error` simulates failure. **Try demo** returns to the workspace. Credentials are not saved or sent; use sample values rather than real credentials.
 
-## Planned full-stack work
+Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Current sign-out changes the local session but does not clear all conversations. Avoid entering sensitive information.
 
-Express and Socket.IO with Supabase-hosted PostgreSQL, real sessions/permissions, durable chat and reconnect synchronization, followed by Docker and CI/CD. See the [implementation specification](docs/IMPLEMENTATION_SPEC.md). No server, migration, Docker or deployment commands are part of this baseline.
+## Stack
+
+| Layer | Current | Planned |
+| --- | --- | --- |
+| Interface | React 19, JavaScript, Bootstrap 5, custom CSS | Preserve the current interface |
+| Tooling | Vite 6, npm lockfile | Add linting and CI |
+| Icons/avatars | Lucide React, local SVG assets | Reuse existing assets |
+| Data | Mock fixtures and localStorage | Supabase-hosted PostgreSQL |
+| Server | Express/pg installed; TODO scaffold | Node.js, Express, Socket.IO |
+| Auth | Local simulation | Server-managed cookie sessions |
+| Verification | Nine model tests and M1 integration test scaffold, currently red | Passing database/browser tests |
+| Delivery | Local build | Docker, GitHub Actions CI/CD |
+
+The proposed backend uses Supabase as managed PostgreSQL. Supabase Auth and Realtime are not part of this architecture; Express and Socket.IO own those responsibilities. This is a proposal, not a shipped feature.
+
+## Repository structure
+
+```text
+chatty/
+  public/avatars/             Runtime SVG assets
+  src/
+    components/
+      Auth.jsx               Authentication prototype
+      Chat.jsx               History, composer and message states
+      Dialogs.jsx            Conversation, group, profile and demo dialogs
+      Sidebar.jsx            Navigation and preferences
+      UI.jsx                 Shared UI primitives
+    App.jsx                  Local state and interactions
+    data.js                  Sample people/messages
+    model.js                 Validation, storage and immutable updates
+    styles.css               Theme tokens and responsive layout
+    main.jsx                 Entry point
+  docs/IMPLEMENTATION_SPEC.md Full-stack requirements and delivery gates
+  server/                    M1 server/migration TODOs and integration tests
+  docker/init-test-db.sql     Local test database initialization
+  docker-compose.yml         Local PostgreSQL service
+  .env.example               Local configuration examples
+  index.html
+  package.json
+  package-lock.json
+  vite.config.js
+```
+
+Fixtures are necessary source for the public demo. Test source, dependencies, build outputs, secrets, test artifacts and private design materials are excluded from Git, so `npm test` and `npm run test:server` only run in the author's local checkout.
+
+## Roadmap
+
+1. Separate mock interactions from the server adapter without redesigning the UI.
+2. Add PostgreSQL migrations, authentication and conversation permissions.
+3. Add durable messages, retry deduplication and reconnect synchronization.
+   Add the planned `/gif` picker through a server-side Giphy proxy; no key in the browser.
+4. Complete group ownership, unread state, typing and presence.
+5. Add integration/browser tests, Docker and gated deployment.
+
+See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirements and acceptance criteria.
 
 ## Limitations
 
-Authentication, presence, typing, unread state, delivery, pagination and group permissions are mocked. Group leave does not prove ownership transfer. Sent means local completion, not received or read. No uploads, calls, read receipts or end-to-end encryption. No production readiness or performance benchmark is claimed.
+No remote messages, real identities, verified permissions, uploads, read receipts, calls or end-to-end encryption. Group leave only removes local data; it does not prove server ownership transfer. Older messages/dates are fixtures. Optional Google Fonts have system-font fallbacks.
 
-Source, tests, assets, lockfiles and public engineering docs belong in Git. Secrets, dependency/build folders, private design materials and local agent notes are excluded.
+No hosted release, production readiness or performance benchmark is claimed. Free hosting has quotas and may pause or sleep; verify current conditions before publishing a live demo.

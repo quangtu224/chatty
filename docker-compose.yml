@@ -1,0 +1,19 @@
+# Local development and tests only; credentials here are not secrets.
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: chatty
+      POSTGRES_PASSWORD: chatty
+      POSTGRES_DB: chatty
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatty -d chatty"]
+      interval: 2s
+      retries: 15
+volumes:
+  pgdata:

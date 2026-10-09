@@ -12,7 +12,12 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Generated test artifacts; keep test source.
+# Test source stays local by owner decision (2026-10-09); never publish it.
+*.test.js
+*.spec.js
+/tests/
+
+# Generated test artifacts.
 coverage/
 playwright-report/
 test-results/

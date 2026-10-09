@@ -34,15 +34,15 @@ Open the URL printed by Vite. The first visit opens the sample workspace. No env
 | `npm test` | Run model tests with Node's test runner (test files are kept private) |
 | `npm run build` | Build the static frontend into `dist/` |
 | `npm run preview` | Preview the built frontend locally |
-| `npm run server` | M1 server entry point (TODO scaffold) |
-| `npm run db:migrate` | Migration entry point (TODO scaffold) |
+| `npm run server` | Start the server shell; auth/profile routes are still pending |
+| `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | M1 PostgreSQL integration tests (currently red on stubs) |
 
-There is no lint, app-container or deployment script yet. Server/migration commands exist but are incomplete; their successful exit does not prove that a server started or migrations ran.
+There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. HTTP error handling and shutdown are implemented, but application routes are not yet complete.
 
 ### M1 development status
 
-Backend outlines, an initial migration outline, an API client outline and acceptance tests exist. Shared account/profile validation and the signup handle input are implemented; live auth is not connected to the UI. Server acceptance tests still depend on unfinished M1 code. This is not a tested full-stack release.
+Identity/session tables and tracked migrations are implemented. Schema constraints, migration repeatability and rollback have been checked with an isolated embedded PostgreSQL engine; a Docker/PostgreSQL network integration run is still pending. Shared validation, HTTP error handling and server shutdown are checked locally. The browser REST client implements JSON requests, cached CSRF tokens with one refresh, structured errors and empty responses. Live auth routes and connecting the client to the UI remain incomplete. This is not a tested full-stack release.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 

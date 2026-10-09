@@ -1,0 +1,35 @@
+node_modules/
+dist/
+
+# Secrets and local configuration; keep sanitized examples.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.log
+.DS_Store
+Thumbs.db
+
+# Generated test artifacts; keep test source.
+coverage/
+playwright-report/
+test-results/
+
+# Private design references/prompts; public/avatars are runtime assets.
+/design/
+/prompts/
+/design-prompts/
+/design-handoff/
+*.prompt.md
+*.prompt.txt
+
+# Local agent instructions, progress and working plans.
+/AGENTS.md
+/docs/PROGRESS.md
+/docs/superpowers/
+/.agents/
+/.claude/
+/.codex/
+/.local-backups/

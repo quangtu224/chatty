@@ -14,15 +14,25 @@ import {
   sendError,
   verifyPassword,
 } from "./auth.js";
+import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
 
-// TODO(M1): DB row -> { id, handle, displayName, avatarId } (+ email when withEmail).
 function toUser(row, withEmail = false) {
-  throw new Error("TODO: toUser");
+  const user = {
+    id: row.id,
+    handle: row.handle,
+    displayName: row.display_name,
+    avatarId: row.avatar_id,
+  };
+  return withEmail ? { ...user, email: row.email } : user;
 }
+
+const renameKeys = (errors, names) =>
+  Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
+const USER_COLUMNS = "id, email, handle, display_name, avatar_id";
 
 // Contract (pinned by server/auth.test.js):
 //   JSON errors: { error: { code, message, fieldErrors? }, requestId }
@@ -59,57 +69,132 @@ export function createApp({
     next();
   });
   app.use(express.json({ limit: "16kb" }));
-  const cookieOptions = { httpOnly: true, sameSite: "lax", path: "/", secure: secureCookies };
+  const cookieOptions = {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: secureCookies,
+  };
   const auth = requireUser(pool);
   const limit = rateLimit(authRateLimit);
 
-  // TODO(M1): `SELECT 1`; 503 `not_ready` when the query throws.
+  const invalid = (req, res, fieldErrors) =>
+    sendError(req, res, 400, "validation_failed", "Check the highlighted fields.", fieldErrors);
+  // Replaces any session the browser already had (session fixation).
+  async function startSession(req, res, db, userId) {
+    await deleteSession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+    const token = await createSession(db, userId);
+    res.cookie(SESSION_COOKIE, token, {
+      ...cookieOptions,
+      maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000,
+    });
+  }
+
   app.get("/health/live", (req, res) => res.json({ status: "ok" }));
   app.get("/health/ready", async (req, res) => {
-    throw new Error("TODO: GET /health/ready");
+    try {
+      await pool.query("SELECT 1");
+    } catch {
+      return sendError(req, res, 503, "not_ready", "Database is unavailable.");
+    }
+    res.json({ status: "ok" });
   });
 
   const v1 = express.Router();
   v1.use(csrfProtection(appOrigin));
 
-  // TODO(M1): 32 random bytes (base64url) -> CSRF_COOKIE (cookieOptions) and { csrfToken }.
   v1.get("/auth/csrf", (req, res) => {
-    throw new Error("TODO: GET /auth/csrf");
+    const csrfToken = randomBytes(32).toString("base64url");
+    res.cookie(CSRF_COOKIE, csrfToken, cookieOptions);
+    res.json({ csrfToken });
   });
 
-  // TODO(M1): validateAuth({ email, password, name: displayName, handle }, true);
-  // map name -> displayName in fieldErrors. INSERT normalized email + trimmed name +
-  // hashPassword; unique violation (err.code "23505", err.constraint) -> 409.
-  // createSession -> SESSION_COOKIE with maxAge SESSION_DAYS; 201 { user: toUser(row, true) }.
   v1.post("/auth/register", limit, async (req, res) => {
-    throw new Error("TODO: POST /auth/register");
+    const { email, password, displayName, handle } = req.body ?? {};
+    const errors = validateAuth({ email, password, name: displayName, handle }, true);
+    if (Object.keys(errors).length)
+      return invalid(req, res, renameKeys(errors, { name: "displayName" }));
+    const passwordHash = await hashPassword(password);
+    try {
+      const user = await withTransaction(pool, async (db) => {
+        const { rows } = await db.query(
+          `INSERT INTO chatty.users (email, handle, display_name, password_hash)
+           VALUES ($1, $2, $3, $4) RETURNING ${USER_COLUMNS}`,
+          [normalizeEmail(email), handle, displayName.trim(), passwordHash],
+        );
+        await startSession(req, res, db, rows[0].id);
+        return rows[0];
+      });
+      res.status(201).json({ user: toUser(user, true) });
+    } catch (err) {
+      if (err.code !== "23505") throw err;
+      const field = err.constraint?.includes("email") ? "email" : "handle";
+      sendError(req, res, 409, "already_exists", "That email or handle is already in use.", {
+        [field]:
+          field === "email"
+            ? "An account with this email already exists."
+            : "That handle is taken.",
+      });
+    }
   });
 
-  // TODO(M1): validateAuth(body, false). Unknown email still runs verifyPassword
-  // against DUMMY_HASH so timing does not reveal accounts. deleteSession(old cookie),
-  // then createSession like register; 200 { user }.
   v1.post("/auth/login", limit, async (req, res) => {
-    throw new Error("TODO: POST /auth/login");
+    const { email, password } = req.body ?? {};
+    const errors = validateAuth({ email, password }, false);
+    if (Object.keys(errors).length) return invalid(req, res, errors);
+    const { rows } = await pool.query(
+      `SELECT ${USER_COLUMNS}, password_hash FROM chatty.users WHERE email = $1`,
+      [normalizeEmail(email)],
+    );
+    // Unknown emails still pay for one Argon2 run, so timing does not reveal accounts.
+    const valid = await verifyPassword(password, rows[0]?.password_hash ?? DUMMY_HASH);
+    if (!rows[0] || !valid)
+      return sendError(req, res, 401, "invalid_credentials", "Email or password is incorrect.");
+    await startSession(req, res, pool, rows[0].id);
+    res.json({ user: toUser(rows[0], true) });
   });
 
-  // TODO(M1): deleteSession(cookie), res.clearCookie(SESSION_COOKIE, cookieOptions), 204.
   v1.post("/auth/logout", async (req, res) => {
-    throw new Error("TODO: POST /auth/logout");
+    await deleteSession(pool, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+    res.clearCookie(SESSION_COOKIE, cookieOptions);
+    res.status(204).end();
   });
 
   v1.get("/me", auth, (req, res) => res.json({ user: toUser(req.user, true) }));
 
-  // TODO(M1): validateProfile({ name: displayName, avatar: avatarId }); map field names
-  // back; UPDATE only the provided columns (COALESCE works); 200 { user }.
   v1.patch("/me", auth, async (req, res) => {
-    throw new Error("TODO: PATCH /me");
+    const { displayName, avatarId } = req.body ?? {};
+    const errors = validateProfile({ name: displayName, avatar: avatarId });
+    if (Object.keys(errors).length)
+      return invalid(req, res, renameKeys(errors, { name: "displayName", avatar: "avatarId" }));
+    const { rows } = await pool.query(
+      `UPDATE chatty.users
+       SET display_name = COALESCE($2, display_name), avatar_id = COALESCE($3, avatar_id)
+       WHERE id = $1 RETURNING ${USER_COLUMNS}`,
+      [req.user.id, displayName?.trim() ?? null, avatarId ?? null],
+    );
+    res.json({ user: toUser(rows[0], true) });
   });
 
-  // TODO(M1): escape \ % _ in query; WHERE id <> caller AND (handle LIKE q% OR
-  // display_name ILIKE %q%) AND handle > cursor ORDER BY handle LIMIT limit + 1;
-  // the extra row tells you whether nextCursor = last handle or null.
   v1.get("/users", auth, async (req, res) => {
-    throw new Error("TODO: GET /users");
+    const text = (value) => (typeof value === "string" ? value : "");
+    const query = text(req.query.query).trim().replace(/[\\%_]/g, "\\$&");
+    const cursor = text(req.query.cursor) || null;
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 10, 1), 20);
+    const { rows } = await pool.query(
+      `SELECT id, handle, display_name, avatar_id FROM chatty.users
+       WHERE id <> $1
+         AND (handle LIKE (lower($2) || '%') OR display_name ILIKE ('%' || $2 || '%'))
+         AND ($3::text IS NULL OR handle > $3)
+       ORDER BY handle
+       LIMIT $4`,
+      [req.user.id, query, cursor, limit + 1],
+    );
+    const page = rows.slice(0, limit);
+    res.json({
+      users: page.map((row) => toUser(row)),
+      nextCursor: rows.length > limit ? page.at(-1).handle : null,
+    });
   });
 
   app.use("/api/v1", v1);
@@ -119,9 +204,21 @@ export function createApp({
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     if (err.type === "entity.parse.failed")
-      return sendError(req, res, 400, "validation_failed", "Provide valid JSON.");
+      return sendError(
+        req,
+        res,
+        400,
+        "validation_failed",
+        "Provide valid JSON.",
+      );
     if (err.type === "entity.too.large")
-      return sendError(req, res, 413, "payload_too_large", "Request body is too large.");
+      return sendError(
+        req,
+        res,
+        413,
+        "payload_too_large",
+        "Request body is too large.",
+      );
     console.error({ requestId: req.id, code: "internal_server_error" });
     sendError(req, res, 500, "internal_server_error", "Internal Server Error");
   });

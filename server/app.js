@@ -1,6 +1,28 @@
 import express from "express";
-import { randomUUID } from "node:crypto";
-import { sendError } from "./auth.js";
+import { randomBytes, randomUUID } from "node:crypto";
+import {
+  CSRF_COOKIE,
+  SESSION_COOKIE,
+  SESSION_DAYS,
+  createSession,
+  csrfProtection,
+  deleteSession,
+  hashPassword,
+  parseCookies,
+  rateLimit,
+  requireUser,
+  sendError,
+  verifyPassword,
+} from "./auth.js";
+import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
+
+// Hash of a random password: lets login spend Argon2 time for unknown emails too.
+const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
+
+// TODO(M1): DB row -> { id, handle, displayName, avatarId } (+ email when withEmail).
+function toUser(row, withEmail = false) {
+  throw new Error("TODO: toUser");
+}
 
 // Contract (pinned by server/auth.test.js):
 //   JSON errors: { error: { code, message, fieldErrors? }, requestId }
@@ -37,7 +59,60 @@ export function createApp({
     next();
   });
   app.use(express.json({ limit: "16kb" }));
-  // TODO(M1): implement the authentication/profile/health routes above.
+  const cookieOptions = { httpOnly: true, sameSite: "lax", path: "/", secure: secureCookies };
+  const auth = requireUser(pool);
+  const limit = rateLimit(authRateLimit);
+
+  // TODO(M1): `SELECT 1`; 503 `not_ready` when the query throws.
+  app.get("/health/live", (req, res) => res.json({ status: "ok" }));
+  app.get("/health/ready", async (req, res) => {
+    throw new Error("TODO: GET /health/ready");
+  });
+
+  const v1 = express.Router();
+  v1.use(csrfProtection(appOrigin));
+
+  // TODO(M1): 32 random bytes (base64url) -> CSRF_COOKIE (cookieOptions) and { csrfToken }.
+  v1.get("/auth/csrf", (req, res) => {
+    throw new Error("TODO: GET /auth/csrf");
+  });
+
+  // TODO(M1): validateAuth({ email, password, name: displayName, handle }, true);
+  // map name -> displayName in fieldErrors. INSERT normalized email + trimmed name +
+  // hashPassword; unique violation (err.code "23505", err.constraint) -> 409.
+  // createSession -> SESSION_COOKIE with maxAge SESSION_DAYS; 201 { user: toUser(row, true) }.
+  v1.post("/auth/register", limit, async (req, res) => {
+    throw new Error("TODO: POST /auth/register");
+  });
+
+  // TODO(M1): validateAuth(body, false). Unknown email still runs verifyPassword
+  // against DUMMY_HASH so timing does not reveal accounts. deleteSession(old cookie),
+  // then createSession like register; 200 { user }.
+  v1.post("/auth/login", limit, async (req, res) => {
+    throw new Error("TODO: POST /auth/login");
+  });
+
+  // TODO(M1): deleteSession(cookie), res.clearCookie(SESSION_COOKIE, cookieOptions), 204.
+  v1.post("/auth/logout", async (req, res) => {
+    throw new Error("TODO: POST /auth/logout");
+  });
+
+  v1.get("/me", auth, (req, res) => res.json({ user: toUser(req.user, true) }));
+
+  // TODO(M1): validateProfile({ name: displayName, avatar: avatarId }); map field names
+  // back; UPDATE only the provided columns (COALESCE works); 200 { user }.
+  v1.patch("/me", auth, async (req, res) => {
+    throw new Error("TODO: PATCH /me");
+  });
+
+  // TODO(M1): escape \ % _ in query; WHERE id <> caller AND (handle LIKE q% OR
+  // display_name ILIKE %q%) AND handle > cursor ORDER BY handle LIMIT limit + 1;
+  // the extra row tells you whether nextCursor = last handle or null.
+  v1.get("/users", auth, async (req, res) => {
+    throw new Error("TODO: GET /users");
+  });
+
+  app.use("/api/v1", v1);
   app.use("/api", (req, res) => {
     sendError(req, res, 404, "not_found", "API route not found.");
   });

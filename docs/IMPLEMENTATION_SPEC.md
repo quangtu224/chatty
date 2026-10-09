@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Date: 2026-10-09. Status: planned full-stack requirements; this commit contains the frontend baseline only.
+Date: 2026-10-09. Status: M1 scaffold and failing tests exist; backend implementation/live UI integration are incomplete.
 
 ## 1. Outcome and constraints
 
@@ -14,14 +14,14 @@ The earlier MongoDB direction is replaced in this proposal by Supabase-hosted Po
 
 | Area | Current | Required work |
 | --- | --- | --- |
-| Auth | Email/password UI, eight-character minimum, local session flag | Users, password hashing, sessions, CSRF and logout |
+| Auth | Email/password/handle UI, signup 10–128, local session flag | Users, password hashing, sessions, CSRF and logout |
 | Messages | Local UUID, optimistic UI, timer-based completion/retry | Persistence, acknowledgements, deduplication, catch-up |
 | Groups | Local creation/membership and owner buttons | Real permissions, explicit ownership transfer |
 | History | Older-message fixtures and scroll preservation | Server pagination/timestamps |
 | Unread | Fixture counts cleared on selection | Read cursor with visibility/scroll rules |
 | Presence/typing | Static people/demo toggles | Authenticated sockets and expiry |
 | Storage | Global `chatty.*.v1` localStorage | Isolate demo and real accounts |
-| Tests | Two frontend model tests | Passing integration and browser tests |
+| Tests | Eleven local model tests passing; PostgreSQL tests not verified | Passing integration and live browser tests |
 
 Source inspection is not browser verification. Current owner-leave copy claims transfer but the local handler only removes the group. Sign-out retains local chat data. Initial state opens the demo workspace. These are known integration gaps.
 
@@ -33,7 +33,7 @@ Retain email/password login to match the implemented UI, superseding the earlier
 
 Add a public unique handle at signup: lowercase ASCII letters/digits/underscore, 3–24 characters. Search handle/display name with bounded paginated results. Display name: 1–40 characters, trimmed. Profile avatar allowlist: cat, fox, raccoon, owl, frog, bear.
 
-Signup passwords: 10–128 characters, never trimmed. Login validation requires a non-empty password, not the current signup minimum. Update `Auth.jsx`, `validateAuth`, placeholders, demo disclosure and tests together at M1. Until then README describes the actual eight-character prototype policy. Use generic login errors. Email verification/account recovery are excluded; this is a portfolio demo, not an identity-assurance service.
+Signup passwords: 10–128 characters, never trimmed. Login validation requires a non-empty password, not the current signup minimum. Shared model validation, signup handle input and hints are implemented locally; live auth remains incomplete. Use generic login errors. Email verification/account recovery are excluded; this is a portfolio demo, not an identity-assurance service.
 
 ### Conversations and permissions
 
@@ -81,7 +81,7 @@ React -- REST / Socket.IO --> Express -- parameterized SQL --> PostgreSQL
 
 Use Supabase only as managed PostgreSQL; no Supabase Auth/Realtime or parallel transports. Use Express, Socket.IO, `pg` and SQL migrations, without an initial ORM. Share services across transports. Express serves frontend build and API/socket on one origin; Vite proxies locally. Add `server/` without moving the root frontend into a monorepo.
 
-Proposed files: create these only when their milestone needs them. No backend files exist in this baseline.
+Target file responsibilities: M1 already has TODO outlines for app/index/db/auth/migrate, the initial SQL file and browser API client. Create remaining files only when needed.
 
 | Path | Responsibility |
 | --- | --- |
@@ -97,8 +97,8 @@ Proposed files: create these only when their milestone needs them. No backend fi
 | `server/realtime.js` | Authorized subscriptions, typing/presence |
 | `server/migrations/001_initial.sql` | Tables, indexes and privileges |
 | `server/migrate.js` | Ordered, tracked migrations with concurrency lock |
-| `server/*.test.js` | Database integration checks |
-| `tests/e2e/chat.spec.js` | Multi-user browser checks |
+| `server/*.test.js` | Database integration checks (local only, not published) |
+| `tests/e2e/chat.spec.js` | Multi-user browser checks (local only, not published) |
 
 Reuse `UI.jsx`, `model.js` and component boundaries. Replace direct fixture lookups in Chat, Sidebar and Dialogs with adapter data; replacing only App's send timeout is insufficient. Preserve theme/layout while integrating.
 
@@ -161,7 +161,7 @@ CSRF tokens and approved Origin for mutations; socket origin/session validation.
 
 Compose will run PostgreSQL and app with health checks/persistent volume. Isolate test database. Production image multi-stage/non-root. Add sanitized `.env.example` when config exists: DATABASE_URL, MIGRATION_DATABASE_URL, TEST_DATABASE_URL, APP_ORIGIN, PORT, NODE_ENV, GIPHY_API_KEY. Local development and tests use PostgreSQL in Docker Compose (`chatty` and `chatty_test` databases); Supabase is connected at M5. Do not advertise executable server commands before their scripts exist.
 
-CI: clean lockfile install, lint, model/integration tests, migrations on isolated PostgreSQL, multi-user E2E, frontend/container builds. Keep tests/migrations/lockfiles in Git. CD runs only a successful main SHA, pins that revision and serializes deployment. Disable auto-deploy bypassing CI. Run migrations once with lock; failures block deployment. Additive schema changes remain compatible with previous app revision.
+Test source is kept out of the public repository by owner decision; model/integration/E2E suites run locally before every push and their results are recorded. CI: clean lockfile install, lint, migrations on isolated PostgreSQL, frontend/container builds. Keep migrations/lockfiles in Git. CD runs only a successful main SHA, pins that revision and serializes deployment. Disable auto-deploy bypassing CI. Run migrations once with lock; failures block deployment. Additive schema changes remain compatible with previous app revision.
 
 Post-deploy: readiness, deployed SHA and smoke checks. Rollback redeploys a known-good app, not automatic destructive schema reversal. Document backup/restore; never delete live data/volumes to recover a release. `/health/live` checks process; `/health/ready` checks database. Structured logs include request ID/status/duration/error code, never secrets.
 
@@ -183,7 +183,7 @@ Render/Supabase are candidate hosts, not provisioned services. Verify quotas, co
 | Multiple tabs | Presence remains with a tab; logout revokes matching session sockets |
 | UI | Keyboard/IME, long text/links, 360px/mobile keyboard, preserved scroll |
 | Privacy | Mock/live isolated, logout clears private state, no direct database exposure |
-| Delivery | Failed CI blocks deployment; SHA/health and rollback verified |
+| Delivery | Failed CI or a failed local test run blocks deployment; SHA/health and rollback verified |
 
 Retain Node's model test runner. Add real PostgreSQL integration tests and Playwright multi-user E2E. Model retry tests alone cannot prove server idempotency. Performance goal, not measured result: warm server, 20 sockets, send-to-receive p95 near one second on a documented stable network. Record measured environment/results before portfolio claims.
 

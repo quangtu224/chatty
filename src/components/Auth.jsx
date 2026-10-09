@@ -4,7 +4,7 @@ import { Brand, Avatar } from "./UI.jsx";
 import { validateAuth } from "../model.js";
 export default function Auth({ onEnter }) {
   const [signup, setSignup] = useState(false),
-    [fields, setFields] = useState({ name: "", email: "", password: "" }),
+    [fields, setFields] = useState({ name: "", handle: "", email: "", password: "" }),
     [errors, setErrors] = useState({}),
     [busy, setBusy] = useState(false);
   function submit(e) {
@@ -61,6 +61,7 @@ export default function Auth({ onEnter }) {
               <input
                 className={`form-control ${errors.name ? "is-invalid" : ""}`}
                 autoComplete="nickname"
+                maxLength={40}
                 value={fields.name}
                 onChange={(e) => setFields({ ...fields, name: e.target.value })}
                 aria-invalid={!!errors.name}
@@ -68,6 +69,21 @@ export default function Auth({ onEnter }) {
               {errors.name && (
                 <small className="field-error">{errors.name}</small>
               )}
+            </label>
+          )}
+          {signup && (
+            <label className="field">
+              Handle
+              <input
+                className={`form-control ${errors.handle ? "is-invalid" : ""}`}
+                autoComplete="username"
+                placeholder="e.g. alex_m"
+                maxLength={24}
+                value={fields.handle}
+                onChange={(e) => setFields({ ...fields, handle: e.target.value })}
+                aria-invalid={!!errors.handle}
+              />
+              {errors.handle && <small className="field-error">{errors.handle}</small>}
             </label>
           )}
           <label className="field">
@@ -90,7 +106,7 @@ export default function Auth({ onEnter }) {
             <input
               className={`form-control ${errors.password ? "is-invalid" : ""}`}
               type="password"
-              placeholder="At least 8 characters"
+              placeholder={signup ? "10–128 characters" : "Your password"}
               autoComplete={signup ? "new-password" : "current-password"}
               value={fields.password}
               onChange={(e) =>
@@ -144,8 +160,9 @@ export default function Auth({ onEnter }) {
             </button>
           </p>
           <div className="auth-disclosure">
-            This is a local frontend demo. Use any valid email and a password
-            with 8+ characters. Nothing is sent to a server.
+            This is a local frontend demo. Sign in with a valid email and any
+            non-empty password. Sign up with a 3–24 character lowercase handle
+            and a 10–128 character password. Nothing is sent to a server.
           </div>
         </form>
       </section>

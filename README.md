@@ -42,7 +42,7 @@ There is no lint, app-container or deployment script yet. Server/migration comma
 
 ### M1 development status
 
-Backend outlines, an initial migration outline, an API client outline and failing acceptance tests exist. Live auth is not connected to the UI. On 2026-10-09, **1 of 9 model tests passes**; the other eight remain red on validation TODOs. Frontend build succeeds with a bundle-size warning. This is not a tested full-stack release.
+Backend outlines, an initial migration outline, an API client outline and acceptance tests exist. Shared account/profile validation and the signup handle input are implemented; live auth is not connected to the UI. Server acceptance tests still depend on unfinished M1 code. This is not a tested full-stack release.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -55,7 +55,7 @@ Once Docker Desktop is running, start local PostgreSQL with `docker compose up -
 5. Open **Group details** to compare owner and regular-member controls.
 6. Edit your profile or switch themes from the sidebar.
 
-Select **Sign out** to view authentication. Any syntactically valid email and a password of at least eight characters passes local validation; an email containing `error` simulates failure. **Try demo** returns to the workspace. Credentials are not saved or sent; use sample values rather than real credentials.
+Select **Sign out** to view authentication. Sign-in accepts a valid email and a non-empty password. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. An email containing `error` simulates failure. **Try demo** returns to the workspace. Credentials are not saved or sent; use sample values rather than real credentials.
 
 Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Current sign-out changes the local session but does not clear all conversations. Avoid entering sensitive information.
 

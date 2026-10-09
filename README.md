@@ -42,7 +42,7 @@ There is no lint, app-container or deployment script yet. Server startup require
 
 ### M1 development status
 
-Identity/session tables and tracked migrations are implemented. Schema constraints, migration repeatability and rollback have been checked with an isolated embedded PostgreSQL engine; a Docker/PostgreSQL network integration run is still pending. Shared validation, HTTP error handling and server shutdown are checked locally. Live auth routes and browser API integration remain incomplete. This is not a tested full-stack release.
+Identity/session tables and tracked migrations are implemented. Schema constraints, migration repeatability and rollback have been checked with an isolated embedded PostgreSQL engine; a Docker/PostgreSQL network integration run is still pending. Shared validation, HTTP error handling and server shutdown are checked locally. The browser REST client implements JSON requests, cached CSRF tokens with one refresh, structured errors and empty responses. Live auth routes and connecting the client to the UI remain incomplete. This is not a tested full-stack release.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 

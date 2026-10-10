@@ -2,9 +2,9 @@
 
 A calm chat workspace for small teams, with a developer-friendly interface and original pixel-art avatars.
 
-Chatty is a full-stack portfolio project in progress. **The current release is an interactive frontend prototype.** Real accounts, server authorization, database persistence and cross-device messaging are not implemented yet.
+Chatty is a full-stack portfolio project in progress. Real account authentication, authorized direct-chat REST APIs and Socket.IO delivery are implemented. The frontend supports live accounts; its chat workspace still uses demo conversations until the next integration slice.
 
-## Current features
+## Frontend demo features
 
 - Responsive direct and group conversation views.
 - Conversation and teammate search over sample data.
@@ -15,7 +15,7 @@ Chatty is a full-stack portfolio project in progress. **The current release is a
 - Demo controls for loading, typing, offline/reconnecting and message failure.
 - Browser persistence for demo conversations, drafts, profile and theme.
 
-Authentication, unread counts, presence, typing, delivery, pagination and group permissions are simulated. The demo is not a secure messaging service.
+In **Try demo**, conversations, unread counts, presence, typing, delivery, pagination and group permissions are simulated. Live sign-in uses server accounts and cookie sessions. The local demo is not a secure messaging service.
 
 ## Quick start
 
@@ -34,15 +34,21 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm test` | Run model tests with Node's test runner (test files are kept private) |
 | `npm run build` | Build the static frontend into `dist/` |
 | `npm run preview` | Preview the built frontend locally |
-| `npm run server` | Start the server shell; auth/profile routes are still pending |
+| `npm run server` | Start auth, direct-chat REST APIs and Socket.IO delivery |
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
-| `npm run test:server` | M1 PostgreSQL integration tests (needs `docker compose up -d db`) |
+| `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. HTTP error handling and shutdown are implemented, but application routes are not yet complete.
+There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group, unread, presence and GIF APIs remain planned.
 
 ### M1 development status
 
-M1 is implemented: email/password accounts with public handles, Argon2id hashing, seven-day cookie sessions, CSRF protection, rate-limited auth, profile updates, teammate search and health checks. On 2026-10-09 the 18 PostgreSQL integration tests passed against Docker PostgreSQL 17, and sign-up, reload, profile save, sign-out and sign-in were checked in a browser against the real server. Conversations are still demo-only until M2. Run `npm run db:migrate` once, then `npm run server` alongside `npm run dev`.
+M1 is implemented: email/password accounts with public handles, Argon2id hashing, seven-day cookie sessions, CSRF protection, rate-limited auth, profile updates, teammate search and health checks. On 2026-10-09 the PostgreSQL integration tests and real-server browser auth flow were checked. Run `npm run db:migrate`, then `npm run server` alongside `npm run dev`.
+
+### M2 development status
+
+M2a provides direct-conversation creation, list/history APIs and durable text-message sends with retry deduplication. M2b pushes newly committed messages to authorized sessions over Socket.IO. It rechecks membership and session expiry for each push and disconnects session tabs on logout or login rotation. Send remains REST; a duplicate retry does not emit again.
+
+Realtime currently uses WebSocket transport only; future browser clients must connect with `transports: ["websocket"]`. Vite proxies `/socket.io` to the backend. Missing messages during disconnection still require REST catch-up in M4. UI live-chat integration and the `/gif` picker remain M2c/M2d work; the whole M2 milestone is not complete.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -66,9 +72,9 @@ Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores sam
 | Interface | React 19, JavaScript, Bootstrap 5, custom CSS | Preserve the current interface |
 | Tooling | Vite 6, npm lockfile | Add linting and CI |
 | Icons/avatars | Lucide React, local SVG assets | Reuse existing assets |
-| Data | Mock fixtures and localStorage | Supabase-hosted PostgreSQL |
-| Server | Express + pg: auth, profile, user search, health | Add Socket.IO messaging |
-| Auth | Local simulation | Server-managed cookie sessions |
+| Data | Local PostgreSQL; mock fixtures only in demo | Supabase-hosted PostgreSQL |
+| Server | Express + pg + Socket.IO: auth, direct-chat APIs and push | Groups, read state and GIF proxy |
+| Auth | Server-managed cookie sessions; separate mock mode | Deployment hardening |
 | Verification | Local model tests and PostgreSQL integration tests (not published) | Multi-user browser tests |
 | Delivery | Local build | Docker, GitHub Actions CI/CD |
 
@@ -117,6 +123,6 @@ See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirem
 
 ## Limitations
 
-No remote messages, real identities, verified permissions, uploads, read receipts, calls or end-to-end encryption. Group leave only removes local data; it does not prove server ownership transfer. Older messages/dates are fixtures. Optional Google Fonts have system-font fallbacks.
+Live-chat UI, uploads, read receipts, calls, group APIs and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
 
 No hosted release, production readiness or performance benchmark is claimed. Free hosting has quotas and may pause or sleep; verify current conditions before publishing a live demo.

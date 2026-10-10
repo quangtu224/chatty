@@ -164,7 +164,7 @@ function positiveInt(value) {
   return n <= MAX_SEQ ? n : null;
 }
 
-export function conversationRoutes({ pool, auth, sendLimit }) {
+export function conversationRoutes({ pool, auth, sendLimit, onMessage = async () => {} }) {
   const router = express.Router();
   // Every conversation route needs a signed-in user (sets req.user).
   router.use("/conversations", auth);
@@ -259,7 +259,14 @@ export function conversationRoutes({ pool, auth, sendLimit }) {
       return { row: inserted.rows[0], created: true };
     });
     if (!result) return notFound(req, res);
-    res.status(result.created ? 201 : 200).json({ message: toMessage(result.row) });
+    const message = toMessage(result.row);
+    if (result.created) {
+      try { await onMessage(message); } catch {
+        // The write already committed; a push failure cannot invalidate its acknowledgement.
+        console.error({ requestId: req.id, code: "message_push_failed" });
+      }
+    }
+    res.status(result.created ? 201 : 200).json({ message });
   });
 
   return router;

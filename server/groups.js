@@ -104,58 +104,175 @@ export const GROUP_SQL = {
     ORDER BY u.display_name, u.handle`,
 };
 
-// TODO(M3a): (await listConversations(db, userId, id))[0] plus
-// members: (await db.query(GROUP_SQL.members, [id])).rows.map((row) => toUser(row)).
-// Return null when the caller is not a member (listConversations returns []).
+// Details view: the list shape plus the public profiles of current members.
+// Returns null when the caller is not a member (listConversations returns []).
 export async function conversationDetails(db, userId, id) {
-  throw new Error("TODO: conversationDetails");
+  const conversations = await listConversations(db, userId, id);
+  if (conversations.length === 0) return null;
+  const { rows } = await db.query(GROUP_SQL.members, [id]);
+  return { ...conversations[0], members: rows.map((row) => toUser(row)) };
+}
+
+// Cleans a list of user ids from a request body: must be an array of UUID strings.
+// Lowercases them (pg returns lowercase, so comparisons with req.user.id work), drops
+// duplicates and the caller's own id. Returns the ids, or null when the input is malformed.
+function otherUserIds(value, me) {
+  if (!Array.isArray(value) || value.length > 100) return null;
+  if (!value.every((id) => typeof id === "string" && UUID.test(id))) return null;
+  return [...new Set(value.map((id) => id.toLowerCase()))].filter((id) => id !== me);
 }
 
 export function groupRoutes({ pool, auth }) {
   const router = express.Router();
   router.use("/conversations", auth);
 
-  // TODO(M3a): validate groupNameError(name) and memberIds (array of UUIDs; lowercase,
-  // drop duplicates and your own id; 1–19 left). GROUP_SQL.countUsers must equal that
-  // count, else 400 fieldErrors.memberIds. In one withTransaction: insertGroup (trimmed
-  // name, you as owner) -> addMembers with [you, ...others] -> 201 with the list shape.
+  const notFound = (req, res) =>
+    sendError(req, res, 404, "not_found", "Conversation not found.");
+  const invalid = (req, res, fieldErrors) =>
+    sendError(req, res, 400, "validation_failed", "Check the highlighted fields.", fieldErrors);
+
+  // Runs `change` inside one transaction after the shared checks of every membership
+  // change: lock the group row (proves membership, else 404), it must be a group (409),
+  // and unless `anyMember` the caller must own it (403). `change` returns either
+  // { error: [status, code, message, fieldErrors?] } or { value }; throwing rolls back.
+  // The response is sent only after COMMIT, so a failure never leaves half a change.
+  async function changeGroup(req, res, { anyMember = false }, change) {
+    const { id } = req.params;
+    if (!UUID.test(id)) return notFound(req, res);
+    const me = req.user.id;
+    const result = await withTransaction(pool, async (db) => {
+      const { rows } = await db.query(GROUP_SQL.lockGroup, [id, me]);
+      if (!rows[0]) return { error: [404, "not_found", "Conversation not found."] };
+      const group = rows[0];
+      if (group.type !== "group")
+        return { error: [409, "not_a_group", "Direct chats don’t have members to manage."] };
+      if (!anyMember && group.owner_id !== me)
+        return { error: [403, "forbidden", "Only the group owner can do that."] };
+      // An error result must not keep earlier writes, so it throws to roll back.
+      const outcome = await change(db, { id, me, group });
+      if (outcome.error) throw Object.assign(new Error("rollback"), { outcome });
+      return outcome;
+    }).catch((err) => {
+      if (err.outcome) return err.outcome;
+      throw err; // a real failure: the app's error handler answers 500
+    });
+    if (result.error) return sendError(req, res, ...result.error);
+    return result.value;
+  }
+
+  // Create a group: the caller becomes owner and member; 1–19 other members.
   router.post("/conversations/groups", async (req, res) => {
-    throw new Error("TODO: POST /conversations/groups");
+    const me = req.user.id;
+    const { name, memberIds } = req.body ?? {};
+    const fieldErrors = {};
+    const nameError = groupNameError(name);
+    if (nameError) fieldErrors.name = nameError;
+    const others = otherUserIds(memberIds, me);
+    if (!others || others.length < 1 || others.length > MAX_GROUP_MEMBERS - 1)
+      fieldErrors.memberIds = `Choose 1–${MAX_GROUP_MEMBERS - 1} teammates.`;
+    if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
+
+    // Every id must belong to a real user; one count query checks them all.
+    const { rows } = await pool.query(GROUP_SQL.countUsers, [others]);
+    if (rows[0].n !== others.length)
+      return invalid(req, res, { memberIds: "Some teammates were not found." });
+
+    const conversation = await withTransaction(pool, async (db) => {
+      const { id } = (await db.query(GROUP_SQL.insertGroup, [name.trim(), me])).rows[0];
+      await db.query(GROUP_SQL.addMembers, [id, [me, ...others]]);
+      return (await listConversations(db, me, id))[0];
+    });
+    res.status(201).json({ conversation });
   });
 
-  // TODO(M3a): non-UUID -> 404; conversationDetails(pool, me, id) ?? 404.
+  // Details for any conversation the caller belongs to (groups and direct chats).
   router.get("/conversations/:id", async (req, res) => {
-    throw new Error("TODO: GET /conversations/:id");
+    const { id } = req.params;
+    if (!UUID.test(id)) return notFound(req, res);
+    const details = await conversationDetails(pool, req.user.id, id);
+    if (!details) return notFound(req, res);
+    res.json({ conversation: details });
   });
 
-  // TODO(M3a) for the four routes below, inside one withTransaction each:
-  //   lockGroup (no row -> 404) -> type !== "group" -> 409 not_a_group
-  //   -> owner_id !== me (except leave) -> 403 forbidden -> the change -> respond.
-  // Tip: return a small result object from the transaction ({ status, code } or data) and
-  // send the response after it commits, so an error never leaves half a change behind.
-
-  // TODO(M3a): validate userIds like memberIds (countUsers); countNewcomers +
-  // member_count > MAX_GROUP_MEMBERS -> 409 group_full; addMembers; 200 with details.
+  // Owner adds members. Existing members are ignored; the group stays at most 20.
   router.post("/conversations/:id/members", async (req, res) => {
-    throw new Error("TODO: POST /conversations/:id/members");
+    const userIds = otherUserIds(req.body?.userIds, req.user.id);
+    const conversation = await changeGroup(req, res, {}, async (db, { id, me, group }) => {
+      // Body checks run after the 404/403 checks: outsiders learn nothing from them.
+      if (!userIds || userIds.length < 1)
+        return {
+          error: [400, "validation_failed", "Check the highlighted fields.",
+            { userIds: "Choose at least one teammate." }],
+        };
+      const known = (await db.query(GROUP_SQL.countUsers, [userIds])).rows[0].n;
+      if (known !== userIds.length)
+        return {
+          error: [400, "validation_failed", "Check the highlighted fields.",
+            { userIds: "Some teammates were not found." }],
+        };
+      // member_count was read under the row lock, so this check cannot race another add.
+      const newcomers = (await db.query(GROUP_SQL.countNewcomers, [id, userIds])).rows[0].n;
+      if (group.member_count + newcomers > MAX_GROUP_MEMBERS)
+        return { error: [409, "group_full", `Groups can have at most ${MAX_GROUP_MEMBERS} members.`] };
+      await db.query(GROUP_SQL.addMembers, [id, userIds]);
+      return { value: await conversationDetails(db, me, id) };
+    });
+    if (conversation) res.json({ conversation });
   });
 
-  // TODO(M3a): :userId must be a UUID (else 404) and not yourself (400);
-  // removeMember rowCount 0 -> 404; 204.
+  // Owner removes one member. The owner leaves through /leave instead.
   router.delete("/conversations/:id/members/:userId", async (req, res) => {
-    throw new Error("TODO: DELETE /conversations/:id/members/:userId");
+    const { userId } = req.params;
+    if (!UUID.test(userId))
+      return sendError(req, res, 404, "not_found", "That person isn’t in this group.");
+    const target = userId.toLowerCase();
+    const done = await changeGroup(req, res, {}, async (db, { id, me }) => {
+      if (target === me)
+        return {
+          error: [400, "validation_failed", "Check the highlighted fields.",
+            { userId: "Use “Leave group” to leave." }],
+        };
+      const removed = await db.query(GROUP_SQL.removeMember, [id, target]);
+      if (!removed.rowCount)
+        return { error: [404, "not_found", "That person isn’t in this group."] };
+      return { value: true };
+    });
+    if (done) res.status(204).end();
   });
 
-  // TODO(M3a): userId must be a UUID and not yourself (400); transferOwner rowCount 0
-  // -> 400 (not a member); 200 with details.
+  // Owner hands ownership to another current member.
   router.post("/conversations/:id/transfer-owner", async (req, res) => {
-    throw new Error("TODO: POST /conversations/:id/transfer-owner");
+    const raw = req.body?.userId;
+    const target = typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
+    const conversation = await changeGroup(req, res, {}, async (db, { id, me }) => {
+      // Checked after the owner check: a non-owner gets 403 whatever they send.
+      if (!target || target === me)
+        return {
+          error: [400, "validation_failed", "Check the highlighted fields.",
+            { userId: "Choose another member." }],
+        };
+      const moved = await db.query(GROUP_SQL.transferOwner, [id, target]);
+      if (!moved.rowCount)
+        return {
+          error: [400, "validation_failed", "Check the highlighted fields.",
+            { userId: "Only current members can become owner." }],
+        };
+      return { value: await conversationDetails(db, me, id) };
+    });
+    if (conversation) res.json({ conversation });
   });
 
-  // TODO(M3a): any member may leave. Owner with member_count > 1 -> 409 transfer_required.
-  // removeMember(me); if you were the last member (member_count === 1) -> closeGroup. 204.
+  // Any member leaves. The owner must transfer first unless they are the last member;
+  // the last member leaving closes the group (history is kept).
   router.post("/conversations/:id/leave", async (req, res) => {
-    throw new Error("TODO: POST /conversations/:id/leave");
+    const done = await changeGroup(req, res, { anyMember: true }, async (db, { id, me, group }) => {
+      if (group.owner_id === me && group.member_count > 1)
+        return { error: [409, "transfer_required", "Make someone else the owner before leaving."] };
+      await db.query(GROUP_SQL.removeMember, [id, me]);
+      if (group.member_count === 1) await db.query(GROUP_SQL.closeGroup, [id]);
+      return { value: true };
+    });
+    if (done) res.status(204).end();
   });
 
   return router;

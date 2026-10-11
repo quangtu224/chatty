@@ -76,6 +76,6 @@ export function messageBodyError(body) {
 // 1–48 characters after trimming (the server stores the trimmed value).
 export function groupNameError(name) {
   if (typeof name !== "string" || !name.trim()) return "Enter a group name.";
-  if (name.trim().length > 48) return "Group name is too long.";
+  if ([...name.trim()].length > 48) return "Group name is too long.";
   return null;
 }

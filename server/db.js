@@ -2,8 +2,15 @@ import pg from "pg";
 
 // Hosted connections need verified TLS (M5).
 export function createPool(connectionString) {
-  return new pg.Pool({ connectionString, max: 10,
-    connectionTimeoutMillis:5000,idleTimeoutMillis:30_000,statement_timeout:10_000 });
+  return new pg.Pool({
+    connectionString,
+    max: 10,
+    // Fail fast instead of hanging a request when the database is unreachable,
+    // close idle connections, and stop any single query after 10 s.
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 10_000,
+  });
 }
 
 export async function withTransaction(pool, fn) {

@@ -1,6 +1,6 @@
 import express from "express";
-import { extname, join, relative, sep } from 'node:path';
-import { performance } from 'node:perf_hooks';
+import { extname, join, relative, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   CSRF_COOKIE,
@@ -76,11 +76,17 @@ export function createApp({
   app.use((req, res, next) => {
     req.id = randomUUID();
     res.set("X-Request-ID", req.id);
-    const started=performance.now();
-    res.on('finish',()=>logger({requestId:req.id,method:req.method,
-      // Route patterns omit user identifiers, query strings, headers and bodies.
-      route:req.route?.path ?? 'unmatched',status:res.statusCode,
-      durationMs:Math.round(performance.now()-started)}));
+    // One structured log line per finished request. The route *pattern* (e.g.
+    // "/conversations/:id/messages", relative to its router) is logged instead of the
+    // URL, so ids, query strings, headers, cookies and bodies never reach the logs.
+    const started = performance.now();
+    res.on("finish", () => logger({
+      requestId: req.id,
+      method: req.method,
+      route: req.route?.path ?? "unmatched",
+      status: res.statusCode,
+      durationMs: Math.round(performance.now() - started),
+    }));
     next();
   });
   app.use(express.json({ limit: "16kb" }));
@@ -105,15 +111,18 @@ export function createApp({
     });
   }
 
-  const health = {status:'ok',...(releaseSha && {sha:releaseSha})};
-  app.get("/health/live", (req, res) => res.set('Cache-Control','no-store').json(health));
+  // Health reports the running Git SHA so releases and rollbacks can prove which
+  // revision is live. no-store: a cached answer could show the wrong revision.
+  const health = { status: "ok", ...(releaseSha && { sha: releaseSha }) };
+  // live = the process answers; ready (below) = it can also reach the database.
+  app.get("/health/live", (req, res) => res.set("Cache-Control", "no-store").json(health));
   app.get("/health/ready", async (req, res) => {
     try {
       await pool.query("SELECT 1");
     } catch {
       return sendError(req, res, 503, "not_ready", "Database is unavailable.");
     }
-    res.set('Cache-Control','no-store').json(health);
+    res.set("Cache-Control", "no-store").json(health);
   });
 
   const v1 = express.Router();
@@ -227,16 +236,28 @@ export function createApp({
   app.use("/api", (req, res) => {
     sendError(req, res, 404, "not_found", "API route not found.");
   });
-  if(frontendDir) {
-    app.use(express.static(frontendDir,{index:false,dotfiles:'ignore',setHeaders:(res,path)=>{
-      res.set('Cache-Control',relative(frontendDir,path).startsWith(`assets${sep}`) && !path.endsWith('.html')
-        ? 'public, max-age=31536000, immutable' : 'no-cache');
-    }}));
-    // HTML navigation only; missing API/assets/private files must remain a 404.
-    app.get('/{*path}',(req,res,next)=>{
-      if(!req.accepts('html') || extname(req.path) || req.path.split('/').some(p=>p.startsWith('.')) ||
-        req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next();
-      res.set('Cache-Control','no-cache').sendFile(join(frontendDir,'index.html'));
+  // Production/Docker: serve the built frontend (dist/) from the same origin as the API
+  // and sockets, so cookies, CSRF and Origin checks need no cross-site setup. In
+  // development Vite serves the frontend instead and frontendDir is undefined.
+  if (frontendDir) {
+    app.use(express.static(frontendDir, {
+      index: false,
+      dotfiles: "ignore",
+      // Vite puts a content hash in every assets/ file name, so those can be cached
+      // forever; index.html must be revalidated to pick up a new release.
+      setHeaders: (res, path) => {
+        const hashed = relative(frontendDir, path).startsWith(`assets${sep}`) && !path.endsWith(".html");
+        res.set("Cache-Control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    }));
+    // Single-page app fallback: browser navigations get index.html. Anything that looks
+    // like a file, a dotfile, health or socket.io falls through to the normal 404.
+    app.get("/{*path}", (req, res, next) => {
+      const notPage = !req.accepts("html") || extname(req.path) ||
+        req.path.split("/").some((part) => part.startsWith(".")) ||
+        req.path.startsWith("/health") || req.path.startsWith("/socket.io");
+      if (notPage) return next();
+      res.set("Cache-Control", "no-cache").sendFile(join(frontendDir, "index.html"));
     });
   }
   app.use((err, req, res, next) => {

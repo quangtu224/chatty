@@ -56,32 +56,36 @@ export function createRealtime(server, { pool, appOrigin }) {
     socket.on("disconnect", () => clearTimeout(expiry));
   });
 
+  // Emits once to every session room the query returns (rows with token_hash).
+  async function emitTo(sql, params, event, payload) {
+    const { rows } = await pool.query(sql, params);
+    const rooms = rows.map((row) => sessionRoom(row.token_hash));
+    if (rooms.length) io.to(rooms).emit(event, payload);
+  }
+
   return {
     async publishMessage(message) {
-      const { rows } = await pool.query(RECIPIENTS_SQL, [message.conversationId]);
-      const rooms = rows.map((row) => sessionRoom(row.token_hash));
-      if (rooms.length) io.to(rooms).emit("message:created", message);
+      await emitTo(RECIPIENTS_SQL, [message.conversationId], "message:created", message);
     },
     // M3c event contract (payloads carry ids only; clients refetch GET /conversations/:id,
     // which already returns the per-user shape: name, members, unreadCount, ...):
     //   conversation:updated        { conversationId }               current members
     //   conversation:access-revoked { conversationId }               users who lost access
     //   read:updated                { conversationId, lastReadSeq }  the reader's own sessions
-    // Rooms are per session (see sessionRoom); turn token_hash rows into room names like
-    // publishMessage does and skip the emit when there are no rooms.
 
-    // TODO(owner): emit "conversation:updated" to every live session of the current
-    // members of conversationId (RECIPIENTS_SQL). A closed group has no members: no-op.
-    async publishConversation(conversationId) {},
-
-    // TODO(owner): emit "conversation:access-revoked" to every live session of userIds
-    // (USER_SESSIONS_SQL). They are no longer members, so RECIPIENTS_SQL cannot find them.
-    // Ignore an empty userIds array.
-    async revokeAccess(conversationId, userIds) {},
-
-    // TODO(owner): emit "read:updated" { conversationId, lastReadSeq } to every live session
-    // of userId (USER_SESSIONS_SQL with [userId]) so the other tabs clear their badge.
-    async publishRead(userId, conversationId, lastReadSeq) {},
+    // Current members' sessions. A closed group has no members, so nothing is sent.
+    async publishConversation(conversationId) {
+      await emitTo(RECIPIENTS_SQL, [conversationId], "conversation:updated", { conversationId });
+    },
+    // Users who just lost access are no longer members: RECIPIENTS_SQL cannot find them.
+    async revokeAccess(conversationId, userIds) {
+      if (!userIds?.length) return;
+      await emitTo(USER_SESSIONS_SQL, [userIds], "conversation:access-revoked", { conversationId });
+    },
+    // My own sessions only (other tabs clear their badge); peers learn nothing about it.
+    async publishRead(userId, conversationId, lastReadSeq) {
+      await emitTo(USER_SESSIONS_SQL, [[userId]], "read:updated", { conversationId, lastReadSeq });
+    },
 
     revokeSession(token) {
       // A logout/rotation closes this session's tabs, preserving independent logins.

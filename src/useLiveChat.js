@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { getMe, getConversations, openDirect, getMessages, sendMessage, markRead as putRead,
+import { getMe, getConversations, openDirect, getMessages, getMessagesAfter, sendMessage, markRead as putRead,
   getConversation, createGroup, addMembers, removeMember, transferOwner, leaveGroup } from './services/api.js';
-import { mergeMessages, viewConversation, latestSeq, countsAsUnread, withPresence } from './services/chat-model.js';
+import { mergeMessages, viewConversation, latestSeq, countsAsUnread, withPresence, contiguousSeq, mergeReadState } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
@@ -59,7 +59,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     const { members, ...rest } = conversation;
     const extra = members ? { memberProfiles: members } : {};
     setChats(cs => cs.some(c => c.id === rest.id)
-      ? cs.map(c => c.id === rest.id ? {...c, ...rest, ...extra,
+      ? cs.map(c => c.id === rest.id ? {...c, ...mergeReadState(c, rest), ...extra,
           lastMessage: c.lastMessage?.seq > (rest.lastMessage?.seq ?? 0) ? c.lastMessage : rest.lastMessage} : c)
       : [{...rest, ...extra, messages: []}, ...cs]);
   }
@@ -78,12 +78,50 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
       else if (err.status === 401) report(err);
     }
   }
+  // M4 catch-up: fetches every page after the contiguous cursor of a conversation that
+  // already has messages, so reconnects and missed pushes never leave holes. A call while
+  // one is running asks it for one more round instead of starting a parallel loop.
+  const syncing = useRef(new Map());
+  async function catchUp(id, token = scope.current) {
+    const running = syncing.current.get(id);
+    if (running) { running.again = true; return; }
+    const state = { again: true };
+    syncing.current.set(id, state);
+    let fetched = 0;
+    try {
+      while (state.again && scope.current === token) {
+        state.again = false;
+        const c = knownChats.current.find(item => item.id === id);
+        if (!c?.messages?.length) break;
+        // Pages are contiguous after `after` (server seqs have no holes), so the cursor
+        // advances locally; knownChats only catches up after the next render.
+        let after = contiguousSeq(c.messages), more = true;
+        while (more && scope.current === token) {
+          const page = await getMessagesAfter(id, after);
+          if (scope.current !== token) return;
+          merge(id, page.messages);
+          fetched += page.messages.length;
+          after = page.messages.at(-1)?.seq ?? after;
+          more = page.hasMore;
+        }
+      }
+      // Fetched messages bypass the push counter; the server knows the true unread count.
+      if (fetched && scope.current === token) loadDetails(id, token);
+    } catch (err) {
+      // Quiet like loadDetails: the hole stays and the next reconnect/selection retries.
+      if (scope.current !== token) return;
+      if (err.status === 404) drop(id);
+      else if (err.status === 401) report(err);
+    } finally {
+      if (syncing.current.get(id) === state) syncing.current.delete(id);
+    }
+  }
   async function refresh(token) {
     const { conversations } = await getConversations();
     if (scope.current !== token) return;
     setChats(cs => conversations.map(c => {
       const old = cs.find(item=>item.id===c.id);
-      return {...old,...c, lastMessage: old?.lastMessage?.seq > (c.lastMessage?.seq ?? 0) ? old.lastMessage : c.lastMessage,
+      return {...old,...mergeReadState(old,c), lastMessage: old?.lastMessage?.seq > (c.lastMessage?.seq ?? 0) ? old.lastMessage : c.lastMessage,
         messages:old?.messages ?? [], hasMore:old?.hasMore};
     }));
     setError('');
@@ -114,7 +152,13 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     const reload = () => refresh(token).catch(err=>{
       if (scope.current === token) { setError(err.message); failed(err); }
     }).finally(()=>{ if (scope.current === token) setLoading(false); });
-    socket.on('connect', () => { setNetwork('online'); reload(); });
+    // (Re)connect: refresh the list (memberships, unread), then fill every loaded chat's
+    // gap since its contiguous cursor. Loaded chats are known before the refresh renders.
+    socket.on('connect', () => {
+      setNetwork('online');
+      const loaded = knownChats.current.filter(c => c.messages?.length).map(c => c.id);
+      reload().then(() => loaded.forEach(id => catchUp(id, token)));
+    });
     socket.on('disconnect', reason => {
       // Presence and typing are unknown while disconnected; the next connect sends a snapshot.
       setOnline(new Set()); setTyping({}); typingSent.current = {id:null,at:0};
@@ -137,10 +181,15 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     socket.on('message:created', message => {
       // Known chats update immediately, even if an unrelated list request fails.
       // Raise the badge first: countsAsUnread compares against the state before the merge.
-      if(knownChats.current.some(c=>c.id===message.conversationId)) {
+      const known=knownChats.current.find(c=>c.id===message.conversationId);
+      if(known) {
         setChats(cs=>cs.map(c=>c.id===message.conversationId && countsAsUnread(c,message,user.id)
           ? {...c,unreadCount:(c.unreadCount??0)+1} : c));
         merge(message.conversationId,[message]);
+        // A seq jump means pushes were missed (e.g. a brief disconnect): keep this message
+        // (the cursor stays before the hole) and fetch what is missing.
+        if (known.messages?.length && message.seq > contiguousSeq(known.messages)+1)
+          catchUp(message.conversationId, token);
       }
       else refresh(token).then(()=>{ if (scope.current === token) merge(message.conversationId,[message]); }).catch(failed);
     });
@@ -164,16 +213,20 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     });
     reload();
     return () => {
-      scope.current = null; socketRef.current = null; socket.disconnect();
+      scope.current = null; socketRef.current = null; socket.disconnect(); syncing.current.clear();
       typingTimers.current.forEach(clearTimeout); typingTimers.current.clear();
     };
   }, [user?.id]);
   useEffect(() => {
     if (!user || !active) return;
     const token = scope.current; let cancelled = false;
-    setChats(cs=>cs.map(c=>c.id===active ? {...c,historyLoading:true,historyError:''} : c));
     // Groups need member profiles for author names and the details dialog.
-    if (knownChats.current.find(c=>c.id===active)?.type==='group') loadDetails(active, token);
+    const known=knownChats.current.find(c=>c.id===active);
+    if (known?.type==='group') loadDetails(active, token);
+    // Already loaded: continue after the contiguous cursor. Fetching the latest page here
+    // instead would leave a hole whenever more than one page arrived since.
+    if (known?.messages?.length) { catchUp(active, token); return; }
+    setChats(cs=>cs.map(c=>c.id===active ? {...c,historyLoading:true,historyError:''} : c));
     getMessages(active).then(page => {
       if (cancelled || scope.current !== token) return;
       setChats(cs=>cs.map(c=>c.id===active ? {...c,messages:mergeMessages(c.messages??[],page.messages),hasMore:page.hasMore,historyLoading:false} : c));
@@ -242,9 +295,11 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
   // history is scrolled to the newest message. Updates the badge at once, then the server.
   function markRead() {
     const c=chats.find(item=>item.id===active), token=scope.current;
-    const seq=latestSeq(c?.messages);
+    // Only up to the contiguous cursor: never mark unseen messages in a hole as read.
+    const seq=contiguousSeq(c?.messages);
     if (!c || !seq || seq<=(c.lastReadSeq??0)) return;
-    setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:seq,unreadCount:0} : item));
+    const all=seq>=latestSeq(c.messages);
+    setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:seq,unreadCount:all ? 0 : item.unreadCount} : item));
     putRead(c.id,seq).then(result=>{
       if (scope.current!==token) return;
       // Another tab may have read further; keep the higher cursor.

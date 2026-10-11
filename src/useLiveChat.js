@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { getMe, getConversations, openDirect, getMessages, sendMessage, markRead as putRead,
   getConversation, createGroup, addMembers, removeMember, transferOwner, leaveGroup } from './services/api.js';
-import { mergeMessages, viewConversation, latestSeq, countsAsUnread } from './services/chat-model.js';
+import { mergeMessages, viewConversation, latestSeq, countsAsUnread, withPresence } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
@@ -17,6 +17,31 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
   callbacks.current = {notify,onExpired,onRevoked};
   // Groups this tab is leaving: their access-revoked push is expected, not news.
   const leaving = useRef(new Set());
+  // M3d presence/typing (ephemeral, never stored). online: contact ids with an open socket;
+  // typing: { conversationId: [userId] }, each entry expiring 5 s after its last refresh.
+  const [online,setOnline]=useState(()=>new Set()), [typing,setTyping]=useState({});
+  const socketRef=useRef(null), typingTimers=useRef(new Map()), typingSent=useRef({id:null,at:0});
+  function setTypist(conversationId, userId, on) {
+    const key=`${conversationId}:${userId}`;
+    clearTimeout(typingTimers.current.get(key));
+    typingTimers.current.delete(key);
+    // Expire after 5 s without a refresh (the typist's tab may have closed mid-word).
+    if (on) typingTimers.current.set(key, setTimeout(()=>setTypist(conversationId,userId,false), 5000));
+    setTyping(t=>{
+      const ids=(t[conversationId]??[]).filter(id=>id!==userId);
+      return {...t,[conversationId]:on ? [...ids,userId] : ids};
+    });
+  }
+  // Tells the other members I am (not) typing in `id`. Repeats of "typing" are sent at
+  // most every 3 s, which keeps the receivers' 5 s expiry alive while I keep typing.
+  function signalTyping(id, on) {
+    const socket=socketRef.current, last=typingSent.current;
+    if (!socket?.connected || !id) return;
+    if (on && last.id===id && Date.now()-last.at<3000) return;
+    if (!on && last.id!==id) return; // nothing to stop
+    typingSent.current=on ? {id,at:Date.now()} : {id:null,at:0};
+    socket.emit('typing:set',{conversationId:id,typing:on});
+  }
   const key = user ? `chatty.live-drafts.${user.id}` : null;
   function report(err) {
     if (err.status === 401) { clearDrafts(); callbacks.current.onExpired(); }
@@ -65,6 +90,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
   }
   useEffect(() => {
     setChats([]); setDrafts({}); setError(''); setLoadingOlder(false); setLoading(false);
+    setOnline(new Set()); setTyping({});
     if (!user) return;
     const token = {userId:user.id}; scope.current = token;
     try {
@@ -74,6 +100,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     } catch { /* Storage can be disabled. */ }
     setLoading(true);
     const socket = io({transports:['websocket']});
+    socketRef.current = socket; typingSent.current = {id:null,at:0};
     const failed = err => { if (scope.current === token) report(err); };
     const checkSession = async reconnect => {
       try {
@@ -89,6 +116,8 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     }).finally(()=>{ if (scope.current === token) setLoading(false); });
     socket.on('connect', () => { setNetwork('online'); reload(); });
     socket.on('disconnect', reason => {
+      // Presence and typing are unknown while disconnected; the next connect sends a snapshot.
+      setOnline(new Set()); setTyping({}); typingSent.current = {id:null,at:0};
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
       if (reason === 'io server disconnect') checkSession(true);
     });
@@ -96,6 +125,15 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
       checkSession(false);
     });
+    // { userIds, online }: a snapshot right after connecting, then single changes.
+    socket.on('presence:updated', ({ userIds, online: on }) => setOnline(prev => {
+      const next = new Set(prev);
+      for (const id of userIds) on ? next.add(id) : next.delete(id);
+      return next;
+    }));
+    socket.on('typing:updated', ({ conversationId, userId, typing: on }) => setTypist(conversationId, userId, on));
+    // No clearing on message:created: the sender's own typing:false (same socket, in order)
+    // ends it, while the REST-driven message push can arrive after they started typing again.
     socket.on('message:created', message => {
       // Known chats update immediately, even if an unrelated list request fails.
       // Raise the badge first: countsAsUnread compares against the state before the merge.
@@ -125,7 +163,10 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
       else loadDetails(conversationId, token);
     });
     reload();
-    return () => { scope.current = null; socket.disconnect(); };
+    return () => {
+      scope.current = null; socketRef.current = null; socket.disconnect();
+      typingTimers.current.forEach(clearTimeout); typingTimers.current.clear();
+    };
   }, [user?.id]);
   useEffect(() => {
     if (!user || !active) return;
@@ -142,7 +183,10 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     } });
     return ()=>{ cancelled=true; };
   }, [user?.id,active,historyVersion]);
+  // Leaving a chat (switching or closing it) stops my typing indicator there.
+  useEffect(() => () => signalTyping(active,false), [active]);
   function setDraft(value) {
+    signalTyping(active, value.trim()!=='');
     setDrafts(ds=>{
       const next = {...ds,[active]:value};
       try { sessionStorage.setItem(key,JSON.stringify(next)); } catch { /* Keep the in-memory draft. */ }
@@ -176,7 +220,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     if (!active) return;
     const id=crypto.randomUUID();
     const message={id,clientMessageId:id,senderId:user.id,body,kind:gif?'gif':'text',gifId:gif?.id??null,createdAt:new Date().toISOString()};
-    setDraft(''); transmit(active,message);
+    setDraft(''); transmit(active,message); // setDraft('') also stops typing
   }
   function retry(id) {
     const message=chats.find(c=>c.id===active)?.messages.find(m=>m.id===id);
@@ -239,6 +283,6 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
   }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),online,typing[c.id])) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

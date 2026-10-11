@@ -68,7 +68,9 @@ export default function Sidebar({
                   <Avatar
                     name={c.avatar}
                     online={
-                      !c.live && type === "direct"
+                      c.live
+                        ? c.peer?.online
+                        : type === "direct"
                         ? people.find(
                             (p) => c.members.includes(p.id) && p.id !== "me",
                           )?.online

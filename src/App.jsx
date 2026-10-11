@@ -384,7 +384,11 @@ export default function App() {
           loadingOlder={live ? liveChat.loadingOlder : loadingOlder}
           network={live ? liveChat.network : network}
           typing={
-            !live && typing && network === "online" && !!chat?.members.includes("alice")
+            live
+              ? chat?.typingPeople
+              : typing && network === "online" && chat?.members.includes("alice")
+                ? [people.find((p) => p.id === "alice")]
+                : []
           }
         />
       )}

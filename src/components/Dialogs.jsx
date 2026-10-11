@@ -300,9 +300,11 @@ export function DetailsDialog({
                 <small>
                   {chat.owner === id
                     ? "Owner"
-                    : chat.live ? 'Member' : p.online
-                      ? "Online · Member"
-                      : "Offline · Member"}
+                    : p.online === undefined
+                      ? "Member"
+                      : p.online
+                        ? "Online · Member"
+                        : "Offline · Member"}
                 </small>
               </span>
               {owner && id !== "me" && onTransfer && (

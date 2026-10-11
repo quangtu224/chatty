@@ -53,3 +53,26 @@ export function viewConversation(c, userId) {
     preview: c.lastMessage?.body,
   };
 }
+
+// M3d: adds live presence and typing to a viewed conversation. `online` is the Set of
+// contact ids with an open socket; `typingIds` are the members typing in this chat.
+// Marks peer/people with `online`, counts online members and resolves typists to profiles
+// (a typist whose profile is not loaded yet shows as "Someone").
+export function withPresence(chat, online, typingIds = []) {
+  const mark = (p) => p && { ...p, online: online.has(p.id) };
+  const peer = mark(chat.peer);
+  const people = chat.people?.map(mark) ?? null;
+  const known = peer ? [peer] : people ?? [];
+  return { ...chat, peer, people,
+    onlineCount: known.filter((p) => p.online).length,
+    typingPeople: typingIds.map((id) => known.find((p) => p.id === id) ?? { id, name: 'Someone', avatar: 'forest' }),
+  };
+}
+
+// "Alice is typing", "Alice and Bob are typing", "Several people are typing" (first names).
+export function typingText(people) {
+  const names = people.map((p) => p.name.split(' ')[0]);
+  if (names.length === 1) return `${names[0]} is typing`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing`;
+  return 'Several people are typing';
+}

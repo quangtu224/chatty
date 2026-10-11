@@ -13,10 +13,13 @@ import { messageBodyError } from "../src/model.js";
 //      400 validation_failed (fieldErrors.userId: not a UUID or your own id) | 404 not_found (no such user)
 // GET  /conversations
 //      200 { conversations } newest activity first (last message time, else creation time)
-// GET  /conversations/:id/messages?beforeSeq=&limit=
-//      200 { messages, hasMore }: ascending by seq; the latest page without beforeSeq;
-//      beforeSeq is exclusive; limit default 30, clamped to 1–50
-//      400 validation_failed when beforeSeq is not a positive integer | 404 not_found unless a member
+// GET  /conversations/:id/messages?beforeSeq=&limit=   (older pages)
+// GET  /conversations/:id/messages?afterSeq=&limit=    (catch-up, M4)
+//      200 { messages, hasMore }: ascending by seq; the latest page without a cursor;
+//      beforeSeq/afterSeq are exclusive; limit default 30, clamped to 1–50.
+//      hasMore: an older page exists (beforeSeq/no cursor) or a newer one (afterSeq).
+//      400 validation_failed: beforeSeq not a positive integer, afterSeq not a whole number
+//      >= 0, or both given | 404 not_found unless a member
 // POST /conversations/:id/messages { clientMessageId, body, kind?: "text"|"gif", gifId? }
 //      201 { message } | 200 { message } for a repeated clientMessageId (original body kept)
 //      400 validation_failed (fieldErrors.clientMessageId / .body) | 404 not_found unless a member
@@ -111,6 +114,15 @@ export const SQL = {
     WHERE conversation_id = $1
       AND ($2::int IS NULL OR seq < $2)
     ORDER BY seq DESC
+    LIMIT $3`,
+
+  // Catch-up page ($1 conversation, $2 afterSeq exclusive, $3 limit + 1 to learn whether a
+  // newer page exists). Oldest first, so repeated calls walk forward without gaps; uses the
+  // unique (conversation_id, seq) index like history.
+  catchUp: `
+    SELECT * FROM chatty.messages
+    WHERE conversation_id = $1 AND seq > $2
+    ORDER BY seq ASC
     LIMIT $3`,
 
   // Send step 1 ($1 conversation, $2 sender). Returns next_seq only if the sender is a
@@ -221,6 +233,8 @@ function positiveInt(value) {
   const n = Number(value);
   return n <= MAX_SEQ ? n : null;
 }
+// Same, but also accepts "0" (afterSeq=0 means "from the first message").
+const wholeInt = (value) => (value === "0" ? 0 : positiveInt(value));
 
 export function conversationRoutes({
   pool,
@@ -293,7 +307,7 @@ export function conversationRoutes({
     res.json({ conversations: await listConversations(pool, req.user.id) });
   });
 
-  // One page of history. Without beforeSeq: the latest page. Always ascending by seq.
+  // One page of history. Without a cursor: the latest page. Always ascending by seq.
   router.get("/conversations/:id/messages", async (req, res) => {
     const { id } = req.params;
     // Checked before any query: PostgreSQL would reject a malformed uuid with a 500.
@@ -305,19 +319,28 @@ export function conversationRoutes({
       if (beforeSeq === null)
         return invalid(req, res, { beforeSeq: "Use a positive whole number." });
     }
+    let afterSeq = null;
+    if (req.query.afterSeq !== undefined) {
+      afterSeq = wholeInt(req.query.afterSeq);
+      if (afterSeq === null)
+        return invalid(req, res, { afterSeq: "Use a whole number of 0 or more." });
+      if (beforeSeq !== null)
+        return invalid(req, res, { afterSeq: "Use either beforeSeq or afterSeq, not both." });
+    }
     // Lenient like /users: a bad or missing limit falls back to 30; range is 1–50.
     const limit = Math.min(Math.max(positiveInt(req.query.limit) ?? 30, 1), 50);
 
     if (!(await pool.query(SQL.isMember, [id, req.user.id])).rowCount)
       return notFound(req, res);
-    // Fetch one extra row: if it exists, an older page exists too.
-    const { rows } = await pool.query(SQL.history, [id, beforeSeq, limit + 1]);
+    // Fetch one extra row: if it exists, another page exists in the same direction.
+    const { rows } = afterSeq === null
+      ? await pool.query(SQL.history, [id, beforeSeq, limit + 1])
+      : await pool.query(SQL.catchUp, [id, afterSeq, limit + 1]);
     const hasMore = rows.length > limit;
-    const messages = rows
-      .slice(0, limit)
-      .reverse()
-      .map((row) => toMessage(row));
-    res.json({ messages, hasMore });
+    const page = rows.slice(0, limit);
+    // history comes newest first; catch-up already ascends.
+    if (afterSeq === null) page.reverse();
+    res.json({ messages: page.map((row) => toMessage(row)), hasMore });
   });
 
   // Text and GIFs share the same membership, sequence and idempotency checks.

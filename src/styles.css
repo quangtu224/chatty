@@ -1545,3 +1545,16 @@ kbd {
     min-height: 44px;
   }
 }
+
+/* The picker stays inside the existing composer and scrolls on small screens. */
+.gif-picker { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; max-height: 300px; overflow: hidden; }
+.gif-picker-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.gif-picker p { font-size: 12px; margin: 8px 0; }
+.gif-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; overflow-y: auto; min-height: 0; }
+.gif-result { border: 2px solid transparent; border-radius: 6px; padding: 0; overflow: hidden; background: transparent; min-height: 72px; }
+.gif-result:focus-visible { border-color: var(--accent); outline: 2px solid currentColor; }
+.gif-result img { width: 100%; height: 90px; object-fit: cover; }
+.message-gif { display: block; max-width: 100%; width: 240px; max-height: 260px; object-fit: contain; border-radius: 6px; }
+.giphy-attribution { display: block; font-size: 11px; margin-top: 6px; color: inherit; }
+.gif-picker-header, .gif-picker p, .gif-picker > .giphy-attribution { flex-shrink: 0; }
+@media (max-width: 600px) { .gif-results { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gif-picker { max-height: 250px; } }

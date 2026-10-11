@@ -17,7 +17,7 @@ import { messageBodyError } from "../src/model.js";
 //      200 { messages, hasMore }: ascending by seq; the latest page without beforeSeq;
 //      beforeSeq is exclusive; limit default 30, clamped to 1–50
 //      400 validation_failed when beforeSeq is not a positive integer | 404 not_found unless a member
-// POST /conversations/:id/messages { clientMessageId, body }
+// POST /conversations/:id/messages { clientMessageId, body, kind?: "text"|"gif", gifId? }
 //      201 { message } | 200 { message } for a repeated clientMessageId (original body kept)
 //      400 validation_failed (fieldErrors.clientMessageId / .body) | 404 not_found unless a member
 //
@@ -116,8 +116,8 @@ export const SQL = {
   // Send step 3: store the message with seq = next_seq from step 1 ($4, body $5), then
   // advance the counter. Same transaction, so a failure rolls the counter back too.
   insertMessage: `
-    INSERT INTO chatty.messages (conversation_id, sender_id, client_message_id, seq, body)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO chatty.messages (conversation_id, sender_id, client_message_id, seq, body, kind, gif_id)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
   bumpSeq: `UPDATE chatty.conversations SET next_seq = next_seq + 1 WHERE id = $1`,
 };
@@ -144,7 +144,10 @@ export function toMessage(row, prefix = "") {
 
 // Conversations visible to userId: all of them, or only conversationId when given.
 async function listConversations(db, userId, conversationId = null) {
-  const { rows } = await db.query(SQL.listConversations, [userId, conversationId]);
+  const { rows } = await db.query(SQL.listConversations, [
+    userId,
+    conversationId,
+  ]);
   return rows.map((row) => ({
     id: row.conversation_id,
     type: "direct",
@@ -164,7 +167,12 @@ function positiveInt(value) {
   return n <= MAX_SEQ ? n : null;
 }
 
-export function conversationRoutes({ pool, auth, sendLimit, onMessage = async () => {} }) {
+export function conversationRoutes({
+  pool,
+  auth,
+  sendLimit,
+  onMessage = async () => {},
+}) {
   const router = express.Router();
   // Every conversation route needs a signed-in user (sets req.user).
   router.use("/conversations", auth);
@@ -173,16 +181,27 @@ export function conversationRoutes({ pool, auth, sendLimit, onMessage = async ()
   const notFound = (req, res) =>
     sendError(req, res, 404, "not_found", "Conversation not found.");
   const invalid = (req, res, fieldErrors) =>
-    sendError(req, res, 400, "validation_failed", "Check the highlighted fields.", fieldErrors);
+    sendError(
+      req,
+      res,
+      400,
+      "validation_failed",
+      "Check the highlighted fields.",
+      fieldErrors,
+    );
 
   // Open (or create) the direct chat between the caller and req.body.userId.
   router.post("/conversations/direct", async (req, res) => {
     const me = req.user.id;
     const raw = req.body?.userId;
     // Lowercase: clients may send uppercase UUIDs, but direct_key only accepts lowercase.
-    const other = typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
+    const other =
+      typeof raw === "string" && UUID.test(raw) ? raw.toLowerCase() : null;
     if (!other) return invalid(req, res, { userId: "Choose a teammate." });
-    if (other === me) return invalid(req, res, { userId: "You can’t start a chat with yourself." });
+    if (other === me)
+      return invalid(req, res, {
+        userId: "You can’t start a chat with yourself.",
+      });
 
     // Sorting makes A->B and B->A produce the same key (the unique constraint does the rest).
     const directKey = [me, other].sort().join(":");
@@ -201,8 +220,17 @@ export function conversationRoutes({ pool, auth, sendLimit, onMessage = async ()
       const [conversation] = await listConversations(db, me, id);
       return { conversation, created: inserted.rowCount === 1 };
     });
-    if (!result) return sendError(req, res, 404, "not_found", "That teammate doesn’t exist.");
-    res.status(result.created ? 201 : 200).json({ conversation: result.conversation });
+    if (!result)
+      return sendError(
+        req,
+        res,
+        404,
+        "not_found",
+        "That teammate doesn’t exist.",
+      );
+    res
+      .status(result.created ? 201 : 200)
+      .json({ conversation: result.conversation });
   });
 
   router.get("/conversations", async (req, res) => {
@@ -224,24 +252,33 @@ export function conversationRoutes({ pool, auth, sendLimit, onMessage = async ()
     // Lenient like /users: a bad or missing limit falls back to 30; range is 1–50.
     const limit = Math.min(Math.max(positiveInt(req.query.limit) ?? 30, 1), 50);
 
-    if (!(await pool.query(SQL.isMember, [id, req.user.id])).rowCount) return notFound(req, res);
+    if (!(await pool.query(SQL.isMember, [id, req.user.id])).rowCount)
+      return notFound(req, res);
     // Fetch one extra row: if it exists, an older page exists too.
     const { rows } = await pool.query(SQL.history, [id, beforeSeq, limit + 1]);
     const hasMore = rows.length > limit;
-    const messages = rows.slice(0, limit).reverse().map((row) => toMessage(row));
+    const messages = rows
+      .slice(0, limit)
+      .reverse()
+      .map((row) => toMessage(row));
     res.json({ messages, hasMore });
   });
 
-  // Send a text message. The response is the acknowledgement: 201 new, 200 duplicate retry.
+  // Text and GIFs share the same membership, sequence and idempotency checks.
   router.post("/conversations/:id/messages", sendLimit, async (req, res) => {
     const { id } = req.params;
     if (!UUID.test(id)) return notFound(req, res);
-    const { clientMessageId, body } = req.body ?? {};
+    const { clientMessageId, body, kind = 'text', gifId = null } = req.body ?? {};
     const fieldErrors = {};
     if (typeof clientMessageId !== "string" || !UUID.test(clientMessageId))
-      fieldErrors.clientMessageId = "Missing message id. Refresh and try again.";
+      fieldErrors.clientMessageId =
+        "Missing message id. Refresh and try again.";
     const bodyError = messageBodyError(body);
     if (bodyError) fieldErrors.body = bodyError;
+    if (!['text','gif'].includes(kind)) fieldErrors.kind = 'Choose text or GIF.';
+    // Only an ID is stored; user-supplied URLs never reach the renderer.
+    if (kind === 'gif' ? typeof gifId !== 'string' || !/^[A-Za-z0-9]{1,100}$/.test(gifId) : gifId !== null)
+      fieldErrors.gifId = 'GIFs need a valid Giphy ID; text must not include one.';
     if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
 
     const me = req.user.id;
@@ -254,14 +291,24 @@ export function conversationRoutes({ pool, auth, sendLimit, onMessage = async ()
       if (existing.rowCount) return { row: existing.rows[0], created: false };
       // 3. New message: take the next seq and advance the counter in the same transaction.
       const { next_seq: seq } = locked.rows[0];
-      const inserted = await db.query(SQL.insertMessage, [id, me, clientMessageId, seq, body]);
+      const inserted = await db.query(SQL.insertMessage, [
+        id,
+        me,
+        clientMessageId,
+        seq,
+        body,
+        kind,
+        gifId,
+      ]);
       await db.query(SQL.bumpSeq, [id]);
       return { row: inserted.rows[0], created: true };
     });
     if (!result) return notFound(req, res);
     const message = toMessage(result.row);
     if (result.created) {
-      try { await onMessage(message); } catch {
+      try {
+        await onMessage(message);
+      } catch {
         // The write already committed; a push failure cannot invalidate its acknowledgement.
         console.error({ requestId: req.id, code: "message_push_failed" });
       }

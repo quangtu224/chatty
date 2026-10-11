@@ -9,11 +9,13 @@ export default function useLiveChat(user, active, notify, onExpired) {
   const [chats, setChats] = useState([]), [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [network, setNetwork] = useState('reconnecting'), [error, setError] = useState('');
+  const [historyVersion,setHistoryVersion]=useState(0);
+  const knownChats=useRef(chats); knownChats.current=chats;
   const scope = useRef(null), callbacks = useRef({notify,onExpired});
   callbacks.current = {notify,onExpired};
   const key = user ? `chatty.live-drafts.${user.id}` : null;
   function report(err) {
-    if (err.status === 401) callbacks.current.onExpired();
+    if (err.status === 401) { clearDrafts(); callbacks.current.onExpired(); }
     else callbacks.current.notify(err.message || 'Unable to reach the server.', '!');
   }
   function merge(id, messages) {
@@ -27,7 +29,7 @@ export default function useLiveChat(user, active, notify, onExpired) {
     if (scope.current !== token) return;
     setChats(cs => conversations.map(c => {
       const old = cs.find(item=>item.id===c.id);
-      return {...c, lastMessage: old?.lastMessage?.seq > (c.lastMessage?.seq ?? 0) ? old.lastMessage : c.lastMessage,
+      return {...old,...c, lastMessage: old?.lastMessage?.seq > (c.lastMessage?.seq ?? 0) ? old.lastMessage : c.lastMessage,
         messages:old?.messages ?? [], hasMore:old?.hasMore};
     }));
     setError('');
@@ -44,21 +46,31 @@ export default function useLiveChat(user, active, notify, onExpired) {
     setLoading(true);
     const socket = io({transports:['websocket']});
     const failed = err => { if (scope.current === token) report(err); };
+    const checkSession = async reconnect => {
+      try {
+        const result=await getMe();
+        if(scope.current!==token)return;
+        // Another tab can rotate the cookie to a different account.
+        if(result.user.id!==user.id){clearDrafts();callbacks.current.onExpired();}
+        else if(reconnect)socket.connect();
+      }catch(err){failed(err);}
+    };
     const reload = () => refresh(token).catch(err=>{
       if (scope.current === token) { setError(err.message); failed(err); }
     }).finally(()=>{ if (scope.current === token) setLoading(false); });
     socket.on('connect', () => { setNetwork('online'); reload(); });
     socket.on('disconnect', reason => {
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
-      if (reason === 'io server disconnect') getMe().then(()=>{if(scope.current===token)socket.connect();}, failed);
+      if (reason === 'io server disconnect') checkSession(true);
     });
     socket.on('connect_error', () => {
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
-      getMe().catch(failed);
+      checkSession(false);
     });
     socket.on('message:created', message => {
-      // Refresh also discovers conversations started by another member.
-      refresh(token).then(()=>{ if (scope.current === token) merge(message.conversationId,[message]); }).catch(failed);
+      // Known chats update immediately, even if an unrelated list request fails.
+      if(knownChats.current.some(c=>c.id===message.conversationId)) merge(message.conversationId,[message]);
+      else refresh(token).then(()=>{ if (scope.current === token) merge(message.conversationId,[message]); }).catch(failed);
     });
     reload();
     return () => { scope.current = null; socket.disconnect(); };
@@ -66,12 +78,16 @@ export default function useLiveChat(user, active, notify, onExpired) {
   useEffect(() => {
     if (!user || !active) return;
     const token = scope.current; let cancelled = false;
+    setChats(cs=>cs.map(c=>c.id===active ? {...c,historyLoading:true,historyError:''} : c));
     getMessages(active).then(page => {
       if (cancelled || scope.current !== token) return;
-      setChats(cs=>cs.map(c=>c.id===active ? {...c,messages:mergeMessages(c.messages??[],page.messages),hasMore:page.hasMore} : c));
-    }).catch(err=>{ if (!cancelled && scope.current===token) report(err); });
+      setChats(cs=>cs.map(c=>c.id===active ? {...c,messages:mergeMessages(c.messages??[],page.messages),hasMore:page.hasMore,historyLoading:false} : c));
+    }).catch(err=>{ if (!cancelled && scope.current===token) {
+      setChats(cs=>cs.map(c=>c.id===active ? {...c,historyError:err.message,historyLoading:false} : c));
+      report(err);
+    } });
     return ()=>{ cancelled=true; };
-  }, [user?.id,active]);
+  }, [user?.id,active,historyVersion]);
   function setDraft(value) {
     setDrafts(ds=>{
       const next = {...ds,[active]:value};
@@ -126,6 +142,6 @@ export default function useLiveChat(user, active, notify, onExpired) {
   }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {chats:owned ? chats.map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,loading,loadingOlder,network,error,
-    reload:()=>refresh(scope.current).catch(report),clearDrafts};
+  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+    reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

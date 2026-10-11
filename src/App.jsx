@@ -333,6 +333,9 @@ export default function App() {
         </main>
       ) : (
         <Chat
+          key={chat?.id || 'empty'}
+          onGifSend={live ? liveChat.send : undefined}
+          onReloadHistory={live ? liveChat.reloadHistory : undefined}
           visible={mobileChat}
           chat={chat}
           profile={shownProfile}

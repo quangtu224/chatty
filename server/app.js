@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from "./auth.js";
 import { conversationRoutes } from "./conversations.js";
+import { gifSearch } from './gifs.js';
 import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 
@@ -56,6 +57,9 @@ export function createApp({
   secureCookies = false,
   onMessage = async () => {},
   onSessionRevoked = () => {},
+  giphyApiKey = process.env.GIPHY_API_KEY,
+  gifFetch = fetch,
+  gifRateLimit = {windowMs:60_000,max:20},
 }) {
   const app = express();
   app.use((req, res, next) => {
@@ -198,6 +202,8 @@ export function createApp({
   });
 
   v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage }));
+  // Separate quota: a provider outage cannot block ordinary text chat.
+  v1.get('/gifs',auth,rateLimit(gifRateLimit),gifSearch({apiKey:giphyApiKey,fetchGifs:gifFetch}));
 
   app.use("/api/v1", v1);
   app.use("/api", (req, res) => {

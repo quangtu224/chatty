@@ -258,7 +258,7 @@ export function DetailsDialog({
         {chat.members.map((id) => {
           const p =
             id === "me"
-              ? { ...profile, id: "me", online: true }
+              ? { ...profile, id: "me", online: chat.live ? undefined : true }
               : chat.live ? chat.peer : people.find((p) => p.id === id);
           return (
             <div className="person-row" key={id}>

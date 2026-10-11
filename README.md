@@ -38,7 +38,7 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group, unread, presence and GIF APIs remain planned.
+There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group, unread and presence APIs remain planned.
 
 ### M1 development status
 
@@ -50,7 +50,11 @@ M2a provides direct-conversation creation, list/history APIs and durable text-me
 
 M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Presence, typing and unread counts are still demo-only.
 
-Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. Reconnect refreshes the conversation list; reopening a chat loads its latest history. Complete gap recovery during disconnection remains M4. The `/gif` picker remains M2d work; the whole M2 milestone is not complete.
+M2d adds `/gif <query>`: Enter opens up to eight G-rated results above the composer. Click a result or use arrow keys and Enter to send; Escape cancels and keeps the command draft. An empty query shows a hint. GIF messages use the same durable send/retry path as text.
+
+Set `GIPHY_API_KEY` in the server's `.env` to enable search; never use a `VITE_` key. `GET /api/v1/gifs?query=` requires a session, limits queries to 100 Unicode characters and has a separate rate limit (20/minute per IP). Missing keys, quota exhaustion and provider errors show a GIF-only error; text chat still works. Search uses `rating=g`, limits results to eight and displays attribution following the [GIPHY API documentation](https://developers.giphy.com/docs/api/). Browsers load images directly from `media.giphy.com`, so GIPHY sees each viewer's IP address. Only alphanumeric GIF IDs are stored and used to construct image URLs. Browser/provider tests use controlled search results; a production key and live provider verification are still needed before release.
+
+Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. Reconnect refreshes the conversation list; reopening a chat loads its latest history. Complete gap recovery during disconnection remains M4. M2 source and its local acceptance checks are complete; live-provider testing is listed above.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -116,8 +120,7 @@ Fixtures are necessary source for the public demo. Test source, dependencies, bu
 
 1. Separate mock interactions from the server adapter without redesigning the UI.
 2. Add PostgreSQL migrations, authentication and conversation permissions.
-3. Add durable messages, retry deduplication and reconnect synchronization.
-   Add the planned `/gif` picker through a server-side Giphy proxy; no key in the browser.
+3. Complete reconnect gap recovery and pending-send persistence across reloads (durable direct messages, retry deduplication and `/gif` are implemented).
 4. Complete group ownership, unread state, typing and presence.
 5. Add integration/browser tests, Docker and gated deployment.
 

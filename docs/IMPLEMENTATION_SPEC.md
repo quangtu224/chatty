@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-11. Status: M1 and M2a/M2b/M2c implemented. GIF integration remains M2d work.
+Updated: 2026-10-11. Status: M1 and M2 implemented and locally verified against PostgreSQL 17 and two browser accounts. GIF provider tests use controlled responses; a live GIPHY key/provider check remains a release prerequisite.
 
 ## 1. Outcome and constraints
 
@@ -67,7 +67,7 @@ Online requires at least one authenticated socket, including multiple tabs. Disc
 
 Keep fixtures and Demo controls behind an explicit mock mode. Try demo must not create a real session or write to the database. Initial live mode checks server session and opens auth when absent, never trusts the old local session flag. Keep mock/live data separate; mock controls do not appear in live chat.
 
-In M1 live mode the conversation list is empty and Demo controls are hidden; real conversations arrive in M2. Fixtures never appear as live data.
+Live mode displays authorized real conversations and hides Demo controls. Fixtures never appear as live data. Live presence, typing and unread state arrive in M3.
 
 Excluded: video/voice, uploads, WASM, AI, push, message-content search, read receipts, message edit/delete, OAuth, verified email, recovery and end-to-end encryption.
 
@@ -193,7 +193,7 @@ Retain Node's model test runner. Add real PostgreSQL integration tests and Playw
 ## 10. Milestones
 
 - [x] **M1: Identity/database.** Server, migrations/config, real email auth/public handles, CSRF/session/profile; integrate App/Auth/model. Gate: auth security/migration tests.
-- [ ] **M2: Durable direct chat.** Slices: M2a migration 002 + REST (direct pair, list, history, send); M2b Socket.IO push; M2c frontend live chat; M2d `/gif`. Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate: two-user, concurrent retry and GIF proxy/validation tests.
+- [x] **M2: Durable direct chat.** Slices: M2a migration 002 + REST (direct pair, list, history, send); M2b Socket.IO push; M2c frontend live chat; M2d `/gif`. Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate passed locally on 2026-10-11: PostgreSQL integration tests (including concurrent retry and GIF proxy/validation), two browser accounts, history paging and GIF keyboard/cancel/outage flows. Provider responses/images were controlled in browser tests; live GIPHY access must be checked before release.
 - [ ] **M3: Groups/read state.** Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
 - [ ] **M4: Recovery/polish.** Catch-up/gaps, fetch races, mock isolation, logout cleanup, responsive/accessibility. Gate: multi-page offline tests.
 - [ ] **M5: Delivery/portfolio.** Docker, lint/CI/CD, hosted connection/migrations, health/rollback, README and demo recording. Gate: exact-SHA deployment/recovery evidence.

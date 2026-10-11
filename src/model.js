@@ -75,5 +75,7 @@ export function messageBodyError(body) {
 // TODO(M3a): null when valid; otherwise a UI message. A group name is a string of
 // 1–48 characters after trimming (the server stores the trimmed value).
 export function groupNameError(name) {
-  throw new Error("TODO: groupNameError");
+  if (typeof name !== "string" || !name.trim()) return "Enter a group name.";
+  if (name.trim().length > 48) return "Group name is too long.";
+  return null;
 }

@@ -32,10 +32,13 @@ export const UUID =
 // ---------------------------------------------------------------------------
 export const SQL = {
   // Conversations visible to a user ($1), optionally only one of them ($2, or null for all).
-  // Columns: conversation_id; the peer as id/handle/display_name/avatar_id (so toUser(row)
-  // works directly); the latest message with a "last_" prefix (all null when there is none).
+  // Columns: conversation_id, type, name, owner_id, member_count; for direct chats the peer
+  // as id/handle/display_name/avatar_id (so toUser(row) works directly; all null for groups);
+  // the latest message with a "last_" prefix (all null when there is none).
   listConversations: `
-    SELECT c.id AS conversation_id,
+    SELECT c.id AS conversation_id, c.type, c.name, c.owner_id,
+           (SELECT count(*)::int FROM chatty.conversation_members cm
+            WHERE cm.conversation_id = c.id) AS member_count,
            peer.id, peer.handle, peer.display_name, peer.avatar_id,
            last.id                AS last_id,
            last.conversation_id   AS last_conversation_id,
@@ -48,9 +51,15 @@ export const SQL = {
            last.created_at        AS last_created_at
     FROM chatty.conversation_members me                      -- start from MY memberships
     JOIN chatty.conversations c ON c.id = me.conversation_id
-    JOIN chatty.conversation_members other                   -- the other person in the chat
-      ON other.conversation_id = c.id AND other.user_id <> me.user_id
-    JOIN chatty.users peer ON peer.id = other.user_id
+    -- The other person, for direct chats only. A plain JOIN would repeat a group once per
+    -- member; LATERAL ... LIMIT 1 with LEFT JOIN keeps exactly one row per conversation.
+    LEFT JOIN LATERAL (
+      SELECT u.* FROM chatty.conversation_members other
+      JOIN chatty.users u ON u.id = other.user_id
+      WHERE c.type = 'direct'
+        AND other.conversation_id = c.id AND other.user_id <> me.user_id
+      LIMIT 1
+    ) peer ON true
     -- LATERAL runs the subquery once per conversation: its newest message, if any.
     -- The unique (conversation_id, seq) index lets it read a single index entry.
     LEFT JOIN LATERAL (
@@ -143,7 +152,10 @@ export function toMessage(row, prefix = "") {
 }
 
 // Conversations visible to userId: all of them, or only conversationId when given.
-async function listConversations(db, userId, conversationId = null) {
+// TODO(M3a): branch on row.type. Direct stays { id, type: "direct", peer, lastMessage };
+// group is { id, type: "group", name: row.name, ownerId: row.owner_id,
+//            memberCount: row.member_count, lastMessage }.
+export async function listConversations(db, userId, conversationId = null) {
   const { rows } = await db.query(SQL.listConversations, [
     userId,
     conversationId,

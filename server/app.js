@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from "./auth.js";
 import { conversationRoutes } from "./conversations.js";
+import { groupRoutes } from "./groups.js";
 import { gifSearch } from './gifs.js';
 import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
@@ -202,6 +203,7 @@ export function createApp({
   });
 
   v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage }));
+  v1.use(groupRoutes({ pool, auth }));
   // Separate quota: a provider outage cannot block ordinary text chat.
   v1.get('/gifs',auth,rateLimit(gifRateLimit),gifSearch({apiKey:giphyApiKey,fetchGifs:gifFetch}));
 

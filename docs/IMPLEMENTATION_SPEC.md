@@ -108,7 +108,7 @@ Reuse `UI.jsx`, `model.js` and component boundaries. Replace direct fixture look
 | --- | --- |
 | `users` | UUID PK, normalized email unique, handle unique, display_name, password_hash, avatar_id, created_at |
 | `sessions` | token_hash PK, user_id FK, expires_at; index expiry/user |
-| `conversations` | UUID PK, direct_key, next_seq (int), created_at; M3 adds type, name, owner_id, description, closed_at |
+| `conversations` | UUID PK, type (`direct`/`group`), direct_key (direct only), name (group, 1–48 trimmed), owner_id (open group), closed_at (closed group), next_seq (int), created_at; a check constraint enforces each type's shape. Group description is not stored. |
 | `conversation_members` | PK (conversation_id,user_id), joined_at, last_read_seq; index (user_id,conversation_id) |
 | `messages` | UUID PK, conversation_id, sender_id, client_message_id (UUID), seq (int), kind (`text`/`gif`), body, gif_id (required only for `gif`), created_at |
 
@@ -194,7 +194,7 @@ Retain Node's model test runner. Add real PostgreSQL integration tests and Playw
 
 - [x] **M1: Identity/database.** Server, migrations/config, real email auth/public handles, CSRF/session/profile; integrate App/Auth/model. Gate: auth security/migration tests.
 - [x] **M2: Durable direct chat.** Slices: M2a migration 002 + REST (direct pair, list, history, send); M2b Socket.IO push; M2c frontend live chat; M2d `/gif`. Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate passed locally on 2026-10-11: PostgreSQL integration tests (including concurrent retry and GIF proxy/validation), two browser accounts, history paging and GIF keyboard/cancel/outage flows. Provider responses/images were controlled in browser tests; live GIPHY access must be checked before release.
-- [ ] **M3: Groups/read state.** Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
+- [ ] **M3: Groups/read state.** Slices: M3a migration 003 + group REST (create, details, add/remove, transfer, leave/close); M3b read cursor/unread; M3c group UI + realtime revocation; M3d typing/presence. Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
 - [ ] **M4: Recovery/polish.** Catch-up/gaps, fetch races, mock isolation, logout cleanup, responsive/accessibility. Gate: multi-page offline tests.
 - [ ] **M5: Delivery/portfolio.** Docker, lint/CI/CD, hosted connection/migrations, health/rollback, README and demo recording. Gate: exact-SHA deployment/recovery evidence.
 

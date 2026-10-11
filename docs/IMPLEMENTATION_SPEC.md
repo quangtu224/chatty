@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-11. Status: M1 and M2 implemented and locally verified against PostgreSQL 17 and two browser accounts. GIF provider tests use controlled responses; a live GIPHY key/provider check remains a release prerequisite.
+Updated: 2026-10-11. Status: M1–M4 locally verified; M5 Docker/local and GitHub CI implementation in progress. The owner chose to defer Supabase/Render and cloud CD. GIF provider tests use controlled responses; live GIPHY access remains a hosted-release prerequisite.
 
 ## 1. Outcome and constraints
 
@@ -8,22 +8,22 @@ Build a working small-team chat application on the existing React interface. Dem
 
 Target: 4–6 weeks; weekly availability is unconfirmed. Use English copy and documentation; preserve the name **Chatty**, JavaScript, Bootstrap, current components/styles and runtime avatars. Keep one backend instance; test with 20 concurrent sockets without claiming production capacity.
 
-The earlier MongoDB direction is replaced in this proposal by Supabase-hosted PostgreSQL. Confirm the architecture when reviewing this spec before implementing it. Do not rebuild the frontend or add a second component system.
+The earlier MongoDB direction is replaced by PostgreSQL, currently local and later Supabase-hosted. Preserve the existing frontend and component system. M5 currently targets Docker/local and GitHub CI only; hosted connection/CD gates remain deferred by the owner.
 
 ## 2. Inspected baseline
 
 | Area | Current | Required work |
 | --- | --- | --- |
 | Auth | Live email/password/handle accounts and server cookie sessions | Deployment verification |
-| Messages | Durable direct-chat REST sends and authorized Socket.IO push; mock UI remains separate | Live-chat UI and catch-up |
-| Groups | Local creation/membership and owner buttons | Real permissions, explicit ownership transfer |
-| History | Older-message fixtures and scroll preservation | Server pagination/timestamps |
-| Unread | Fixture counts cleared on selection | Read cursor with visibility/scroll rules |
-| Presence/typing | Static people/demo toggles | Authenticated sockets and expiry |
-| Storage | Global `chatty.*.v1` localStorage | Isolate demo and real accounts |
-| Tests | Local model/API/auth/direct-chat/realtime suites | Docker recheck, live-chat browser verification |
+| Messages | Durable direct/group REST sends, authorized Socket.IO push and recovery | Hosted verification |
+| Groups | Owner permissions, explicit transfer, add/remove/leave and live dialogs | Hosted race/recovery check |
+| History | Server timestamps, older paging and contiguous catch-up | Hosted verification |
+| Unread | Persistent read cursors with visibility/scroll rules | Real browser tab/mobile keyboard check |
+| Presence/typing | Authenticated sockets and ephemeral expiry | One process; no multi-instance support |
+| Storage | Isolated demo localStorage and account-scoped tab drafts | Pending sends remain memory-only |
+| Tests | Private model/API/PostgreSQL/multi-user browser suites | Public CI build/migration diagnostics |
 
-Source inspection is not browser verification. Group ownership is still mock-only. Initial load checks the server session; Try demo explicitly opens fixtures. Historical demo storage is retained separately; live logout ends the server session.
+Source inspection is not browser verification. Initial load checks the server session; Try demo explicitly opens fixtures. Historical demo storage is retained separately; live logout ends the server session.
 
 ## 3. Product rules
 
@@ -162,7 +162,7 @@ Argon2id for passwords via `node:crypto` (requires Node.js 24.7 or newer; no has
 
 CSRF tokens and approved Origin for mutations; socket origin/session validation. Rate-limit auth/search/send; cap payload. No credentials or message bodies in logs. `VITE_*` values are public, never secrets.
 
-Compose will run PostgreSQL and app with health checks/persistent volume. Isolate test database. Production image multi-stage/non-root. Add sanitized `.env.example` when config exists: DATABASE_URL, MIGRATION_DATABASE_URL, TEST_DATABASE_URL, APP_ORIGIN, PORT, NODE_ENV, GIPHY_API_KEY. Local development and tests use PostgreSQL in Docker Compose (`chatty` and `chatty_test` databases); Supabase is connected at M5. Do not advertise executable server commands before their scripts exist.
+Compose runs PostgreSQL and app with health checks/persistent volume; migration and runtime-role jobs gate startup. The production image is multi-stage/non-root with a pinned Node base and explicit source allowlist. `.env.example` documents local configuration. Local tests accept only loopback `chatty_test`. Hosted Supabase/TLS and cloud CD remain deferred; do not mark those gates complete from local evidence.
 
 Test source is kept out of the public repository by owner decision; model/integration/E2E suites run locally before every push and their results are recorded. CI: clean lockfile install, lint, migrations on isolated PostgreSQL, frontend/container builds. Keep migrations/lockfiles in Git. CD runs only a successful main SHA, pins that revision and serializes deployment. Disable auto-deploy bypassing CI. Run migrations once with lock; failures block deployment. Additive schema changes remain compatible with previous app revision.
 

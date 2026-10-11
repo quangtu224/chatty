@@ -1,0 +1,64 @@
+name: CI
+on:
+  push:
+    branches: [main, 'm*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint-migrate-build-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: chatty
+          POSTGRES_PASSWORD: chatty
+          POSTGRES_DB: chatty_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U chatty -d chatty_ci"
+          --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      MIGRATION_DATABASE_URL: postgres://chatty:chatty@127.0.0.1:5432/chatty_ci
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      # Private unit/integration/browser suites run locally; they are not in this checkout.
+      - name: Apply migrations and verify re-run
+        run: |
+          npm run db:migrate
+          npm run db:migrate
+          docker exec -i "${{ job.services.postgres.id }}" psql -U chatty -d chatty_ci -v ON_ERROR_STOP=1 < docker/runtime-role.sql
+      - run: npm run build
+      - name: Build release image
+        run: docker build --build-arg RELEASE_SHA="$RELEASE_SHA" --tag "chatty:$RELEASE_SHA" .
+      - name: Run image and verify exact revision
+        run: |
+          docker run -d --name chatty-ci --network host --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+            -e NODE_ENV=development -e APP_ORIGIN=http://127.0.0.1:3000 \
+            -e DATABASE_URL=postgres://chatty_app:chatty_app_local@127.0.0.1:5432/chatty_ci "chatty:$RELEASE_SHA"
+          npm run smoke -- http://127.0.0.1:3000 "$RELEASE_SHA"
+          test "$(docker exec chatty-ci id -u)" != 0
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs chatty-ci 2>/dev/null || true
+      - name: Remove CI container
+        if: always()
+        run: docker rm -f chatty-ci 2>/dev/null || true

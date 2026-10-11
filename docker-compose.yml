@@ -15,5 +15,51 @@ services:
       test: ["CMD-SHELL", "pg_isready -U chatty -d chatty"]
       interval: 2s
       retries: 15
+  migrate:
+    image: chatty:${RELEASE_SHA:-development}
+    pull_policy: never
+    command: ["node", "server/migrate.js"]
+    environment:
+      MIGRATION_DATABASE_URL: postgres://chatty:chatty@db:5432/chatty
+    depends_on:
+      db:
+        condition: service_healthy
+  provision:
+    image: postgres:17
+    command: ["psql", "-h", "db", "-U", "chatty", "-d", "chatty", "-v", "ON_ERROR_STOP=1", "-f", "/bootstrap/runtime-role.sql"]
+    environment:
+      PGPASSWORD: chatty
+    volumes:
+      - ./docker/runtime-role.sql:/bootstrap/runtime-role.sql:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  app:
+    image: chatty:${RELEASE_SHA:-development}
+    build:
+      context: .
+      args:
+        RELEASE_SHA: ${RELEASE_SHA:-development}
+    init: true
+    environment:
+      # Local HTTP cannot use Secure cookies. The image defaults to production/HTTPS.
+      NODE_ENV: development
+      DATABASE_URL: postgres://chatty_app:chatty_app_local@db:5432/chatty
+      APP_ORIGIN: http://127.0.0.1:${APP_PORT:-3000}
+      PORT: 3000
+      GIPHY_API_KEY: ${GIPHY_API_KEY:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    depends_on:
+      provision:
+        condition: service_completed_successfully
 volumes:
   pgdata:

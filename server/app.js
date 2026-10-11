@@ -1,4 +1,6 @@
 import express from "express";
+import { extname, join, relative, sep } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   CSRF_COOKIE,
@@ -66,11 +68,19 @@ export function createApp({
   giphyApiKey = process.env.GIPHY_API_KEY,
   gifFetch = fetch,
   gifRateLimit = {windowMs:60_000,max:20},
+  frontendDir,
+  releaseSha,
+  logger = () => {},
 }) {
   const app = express();
   app.use((req, res, next) => {
     req.id = randomUUID();
     res.set("X-Request-ID", req.id);
+    const started=performance.now();
+    res.on('finish',()=>logger({requestId:req.id,method:req.method,
+      // Route patterns omit user identifiers, query strings, headers and bodies.
+      route:req.route?.path ?? 'unmatched',status:res.statusCode,
+      durationMs:Math.round(performance.now()-started)}));
     next();
   });
   app.use(express.json({ limit: "16kb" }));
@@ -95,14 +105,15 @@ export function createApp({
     });
   }
 
-  app.get("/health/live", (req, res) => res.json({ status: "ok" }));
+  const health = {status:'ok',...(releaseSha && {sha:releaseSha})};
+  app.get("/health/live", (req, res) => res.set('Cache-Control','no-store').json(health));
   app.get("/health/ready", async (req, res) => {
     try {
       await pool.query("SELECT 1");
     } catch {
       return sendError(req, res, 503, "not_ready", "Database is unavailable.");
     }
-    res.json({ status: "ok" });
+    res.set('Cache-Control','no-store').json(health);
   });
 
   const v1 = express.Router();
@@ -216,6 +227,18 @@ export function createApp({
   app.use("/api", (req, res) => {
     sendError(req, res, 404, "not_found", "API route not found.");
   });
+  if(frontendDir) {
+    app.use(express.static(frontendDir,{index:false,dotfiles:'ignore',setHeaders:(res,path)=>{
+      res.set('Cache-Control',relative(frontendDir,path).startsWith(`assets${sep}`) && !path.endsWith('.html')
+        ? 'public, max-age=31536000, immutable' : 'no-cache');
+    }}));
+    // HTML navigation only; missing API/assets/private files must remain a 404.
+    app.get('/{*path}',(req,res,next)=>{
+      if(!req.accepts('html') || extname(req.path) || req.path.split('/').some(p=>p.startsWith('.')) ||
+        req.path.startsWith('/health') || req.path.startsWith('/socket.io')) return next();
+      res.set('Cache-Control','no-cache').sendFile(join(frontendDir,'index.html'));
+    });
+  }
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     if (err.type === "entity.parse.failed")

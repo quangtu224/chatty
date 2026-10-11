@@ -4,6 +4,17 @@ A calm chat workspace for small teams, with a developer-friendly interface and o
 
 Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. An explicit demo mode provides sample conversations separately.
 
+## Live features
+
+- Email/password accounts, public handles, cookie sessions and profile/avatar editing.
+- Durable direct/group text and GIF messages, server timestamps, history paging and idempotent retry.
+- Group membership, explicit ownership transfer and realtime access revocation.
+- Unread cursors based on visible chat/scroll position; presence across tabs and expiring typing indicators.
+- Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
+- Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.
+
+M1–M4 are implemented. M5 currently targets Docker/local and GitHub CI; Supabase hosting, cloud CD and a hosted demo are deferred. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
+
 ## Frontend demo features
 
 - Responsive direct and group conversation views.
@@ -19,7 +30,7 @@ In **Try demo**, conversations, unread counts, presence, typing, delivery, pagin
 
 ## Quick start
 
-Use Node.js 24.7 or newer and npm, matching `package.json`. Planned password hashing uses Node's built-in Argon2 API. Run from the directory containing this README:
+Use Node.js 24.7 or newer and npm, matching `package.json`. Password hashing uses Node's built-in Argon2 API. Run from the directory containing this README:
 
 ```sh
 npm ci
@@ -33,12 +44,28 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run dev` | Start Vite locally |
 | `npm test` | Run model tests with Node's test runner (test files are kept private) |
 | `npm run build` | Build the static frontend into `dist/` |
+| `npm run lint` | ESLint correctness and Rules of Hooks checks |
+| `npm run verify` | Private local suites, lint and production build |
+| `npm run release:local` | Verify clean HEAD, migrate and deploy its Docker image locally |
+| `npm run smoke -- <origin> <sha>` | Read-only frontend/API/health revision check |
 | `npm run preview` | Preview the built frontend locally |
 | `npm run server` | Start auth, direct-chat REST APIs and Socket.IO delivery |
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group (M3a), read-state (M3b) and group realtime (M3c), presence and typing (M3d) exist.
+Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Production requires an HTTPS origin and built frontend; local HTTP Compose uses development cookies. The runtime database user has DML-only privileges, separate from the migration owner. Hosted verified TLS connections are deferred with Supabase hosting.
+
+### Docker/local and CI
+
+For an ungated public demo build without the private test files:
+
+```sh
+docker compose --env-file .env.example build app
+docker compose --env-file .env.example up -d --wait app
+npm run smoke -- http://127.0.0.1:3000 development
+```
+
+Open `http://127.0.0.1:3000`. Compose preserves PostgreSQL data, runs migrations/grants before app startup and waits for health. The image excludes private tests, notes and secrets; the frontend build always uses production React even when the server's local `.env` says development. To release a committed revision with the owner's local tests, follow `npm run release:local` in the operations runbook. GitHub CI installs the lockfile, lints, migrates an isolated database twice, builds the frontend/container and checks exact-SHA readiness. Tests stay private and run locally; CI does not claim to run them.
 
 ### M1 development status
 
@@ -71,7 +98,7 @@ Once Docker Desktop is running, start local PostgreSQL with `docker compose up -
 5. Open **Group details** to compare owner and regular-member controls.
 6. Edit your profile or switch themes from the sidebar.
 
-Sign-in and sign-up call the Chatty server; without a running server they show a "couldn’t reach the server" message. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. A signed-in account sees an empty conversation list and no Demo controls; real conversations arrive in M2. **Try demo** never contacts the server.
+Sign-in and sign-up call the Chatty server; without a running server they show a "couldn’t reach the server" message. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. Signed-in accounts see only their real conversations and no Demo controls. **Try demo** never creates a real account or session.
 
 Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Demo sign-out returns to sign-in but keeps demo conversations; live sign-out ends the server session. Avoid entering sensitive information.
 
@@ -80,15 +107,15 @@ Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores sam
 | Layer | Current | Planned |
 | --- | --- | --- |
 | Interface | React 19, JavaScript, Bootstrap 5, custom CSS | Preserve the current interface |
-| Tooling | Vite 6, npm lockfile | Add linting and CI |
+| Tooling | Vite 6, ESLint 10, npm lockfile | Maintain checked builds |
 | Icons/avatars | Lucide React, local SVG assets | Reuse existing assets |
 | Data | Local PostgreSQL; mock fixtures only in demo | Supabase-hosted PostgreSQL |
-| Server | Express + pg + Socket.IO: auth, direct-chat APIs and push | Groups, read state and GIF proxy |
+| Server | Express + pg + Socket.IO: auth, groups/direct chat, recovery, read state, GIF proxy and ephemeral events | Hosted verification |
 | Auth | Server-managed cookie sessions; separate mock mode | Deployment hardening |
-| Verification | Local model tests and PostgreSQL integration tests (not published) | Multi-user browser tests |
-| Delivery | Local build | Docker, GitHub Actions CI/CD |
+| Verification | Private model/API/PostgreSQL and multi-user browser suites | Hosted release checks |
+| Delivery | Non-root Docker, local release/rollback, GitHub CI workflow | Cloud CD after hosted setup |
 
-The proposed backend uses Supabase as managed PostgreSQL. Supabase Auth and Realtime are not part of this architecture; Express and Socket.IO own those responsibilities. This is a proposal, not a shipped feature.
+Supabase is planned only as managed PostgreSQL. Supabase Auth and Realtime are not part of this architecture; Express and Socket.IO own those responsibilities. The current verified database is local PostgreSQL 17.
 
 ## Repository structure
 
@@ -97,12 +124,13 @@ chatty/
   public/avatars/             Runtime SVG assets
   src/
     components/
-      Auth.jsx               Authentication prototype
+      Auth.jsx               Live sign-in/sign-up and explicit demo entry
       Chat.jsx               History, composer and message states
       Dialogs.jsx            Conversation, group, profile and demo dialogs
       Sidebar.jsx            Navigation and preferences
       UI.jsx                 Shared UI primitives
-    App.jsx                  Local state and interactions
+    App.jsx                  Workspace orchestration and isolated demo mode
+    useLiveChat.js           Live chat, read state, events and recovery
     data.js                  Sample people/messages
     model.js                 Validation, storage and immutable updates
     styles.css               Theme tokens and responsive layout
@@ -110,7 +138,11 @@ chatty/
   docs/IMPLEMENTATION_SPEC.md Full-stack requirements and delivery gates
   server/                    Express app, auth, migrations
   docker/init-test-db.sql     Local test database initialization
-  docker-compose.yml         Local PostgreSQL service
+  docker-compose.yml         Local app/database/migration/runtime grants
+  Dockerfile                 Pinned multi-stage non-root runtime
+  scripts/                   Build, release and health diagnostics
+  .github/workflows/ci.yml    Lint/migration/build/container smoke gates
+  docs/OPERATIONS.md         Release, rollback, backup and portfolio recording
   .env.example               Local configuration examples
   index.html
   package.json
@@ -122,10 +154,10 @@ Fixtures are necessary source for the public demo. Test source, dependencies, bu
 
 ## Roadmap
 
-1. Separate mock interactions from the server adapter without redesigning the UI.
-2. Add PostgreSQL migrations, authentication and conversation permissions.
-3. Pending-send persistence across reloads (durable messages, retry deduplication, reconnect catch-up and `/gif` are implemented).
-4. Add integration/browser tests, Docker and gated deployment.
+1. Publish the branch and obtain a real GitHub CI run; configure required checks on main.
+2. Connect Supabase with verified TLS/separate roles, then add gated cloud CD, HTTPS smoke and hosted rollback evidence.
+3. Record a short demo with test accounts; verify live GIPHY access before claiming it in a hosted release.
+4. Consider pending-send persistence across reloads after the first hosted release.
 
 See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirements and acceptance criteria.
 

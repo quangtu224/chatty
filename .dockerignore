@@ -1,0 +1,20 @@
+# Build context allowlist: private coursework, secrets, tests and notes never enter it.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!index.html
+!vite.config.js
+!src/
+!src/**
+!public/
+!public/**
+!server/
+!server/**
+!scripts/
+!scripts/healthcheck.mjs
+!scripts/build.mjs
+**/*.test.js
+**/*.spec.js
+**/*.test.mjs
+**/*.spec.mjs

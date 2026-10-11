@@ -50,9 +50,14 @@ export default function App() {
     [toast, setToast] = useState("");
   const timers = useRef(new Set());
   const live = mode === "live";
-  const liveChat = useLiveChat(live ? user : null, active, notify, () => {
-    setUser(null); setMode('auth'); setModal(null); setActive(null);
-  }, (id, name) => {
+  // Back to sign-in (logout or expired session). Clears per-account view state so the
+  // next account in this tab sees nothing of the previous one; useLiveChat drops its data
+  // and socket when `user` becomes null. Theme and demo data stay (not private).
+  function endSession() {
+    setUser(null); setMode('auth'); setModal(null); setConfirmation(null);
+    setActive(null); setMobileChat(false); setSearch('');
+  }
+  const liveChat = useLiveChat(live ? user : null, active, notify, endSession, (id, name) => {
     // Removed from a group (or it was left in another tab): close it if it is open.
     // useLiveChat calls the latest callback, so `active` is current here.
     if (active === id) {
@@ -346,11 +351,9 @@ export default function App() {
             } catch {
               return notify("We couldn’t sign you out. Try again.", "!");
             }
-            setUser(null);
             liveChat.clearDrafts();
           }
-          setModal(null);
-          setMode("auth");
+          endSession();
         }}
         onDemo={live ? undefined : () => setModal("demo")}
       />

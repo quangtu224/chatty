@@ -15,6 +15,7 @@ const run=(command,args)=>{
 run(process.execPath,[process.env.npm_execpath,'run','verify']);
 clean();assert.equal(git('rev-parse','HEAD'),sha,'HEAD changed during verification.');
 run('docker',['compose','build','app']);
+clean();assert.equal(git('rev-parse','HEAD'),sha,'Source changed while building the image.');
 // Dependencies run migrations/grants before app start; a failure prevents this revision starting.
 run('docker',['compose','up','-d','--wait','--wait-timeout','60','app']);
 run(process.execPath,['scripts/smoke.mjs',`http://127.0.0.1:${process.env.APP_PORT ?? 3000}`,sha]);

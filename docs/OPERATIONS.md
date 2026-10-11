@@ -26,6 +26,8 @@ npm run smoke -- http://127.0.0.1:3000 development
 
 This development image is labeled `development`, not a verified release. Never invent a SHA label for uncommitted source. `docker compose ps -a` shows the migration/provision jobs exiting successfully and app/db health; `docker compose logs app` contains request IDs, route patterns, status and duration, excluding bodies/cookies/query strings. `/health/live` checks the process; `/health/ready` checks database connectivity. Both include the image SHA. Health does not prove every feature works.
 
+Local Compose updates can interrupt availability while replacing the app; zero-downtime deployment is not promised. A failed migration prevents the new app starting. Restore service with a retained compatible image after diagnosing the failure.
+
 ## Rollback
 
 Keep the last verified image locally. Record its SHA, image ID and a passing smoke result. Stop/start only the app with that retained image; do not rebuild old source under the old tag or reverse migrations automatically. Additive migrations must stay compatible with the previous app.

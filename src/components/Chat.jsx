@@ -91,8 +91,8 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            <i className={online ? "status-online" : "status-offline"} />
-            {chat.type === "group"
+            {!chat.live && <i className={online ? "status-online" : "status-offline"} />}
+            {chat.live ? `@${chat.peer.handle}` : chat.type === "group"
               ? `${chat.members.length} members · ${online} online`
               : online
                 ? "Online · Here to chat"
@@ -174,19 +174,20 @@ export default function Chat({
             const person =
               m.author === "me"
                 ? profile
-                : people.find((p) => p.id === m.author) || people[1];
+                : chat.live ? chat.peer : people.find((p) => p.id === m.author) || people[1];
             const outgoing = m.author === "me";
             const grouped =
               i > 0 &&
               chat.messages[i - 1].author === m.author &&
               !m.unreadStart &&
-              chat.messages[i - 1].older === m.older;
+              chat.messages[i - 1].older === m.older &&
+              (!chat.live || chat.messages[i - 1].date === m.date);
             return (
               <div key={m.id}>
-                {((i === 0 && !m.older) ||
-                  (m.older !== chat.messages[i - 1]?.older && !m.older)) && (
+                {(chat.live ? i === 0 || m.date !== chat.messages[i - 1]?.date : ((i === 0 && !m.older) ||
+                  (m.older !== chat.messages[i - 1]?.older && !m.older))) && (
                   <div className="date-divider">
-                    <span>Today, October 8</span>
+                    <span>{chat.live ? m.date : 'Today, October 8'}</span>
                   </div>
                 )}
                 {m.unreadStart && (
@@ -206,7 +207,7 @@ export default function Chat({
                     {!grouped && (
                       <div className="message-meta">
                         {!outgoing && <strong>{person.name}</strong>}
-                        <time>{m.time}</time>
+                        <time dateTime={m.createdAt}>{m.time}</time>
                       </div>
                     )}
                     <div

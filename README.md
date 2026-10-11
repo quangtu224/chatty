@@ -2,7 +2,7 @@
 
 A calm chat workspace for small teams, with a developer-friendly interface and original pixel-art avatars.
 
-Chatty is a full-stack portfolio project in progress. Real account authentication, authorized direct-chat REST APIs and Socket.IO delivery are implemented. The frontend supports live accounts; its chat workspace still uses demo conversations until the next integration slice.
+Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. An explicit demo mode provides sample conversations separately.
 
 ## Frontend demo features
 
@@ -48,7 +48,9 @@ M1 is implemented: email/password accounts with public handles, Argon2id hashing
 
 M2a provides direct-conversation creation, list/history APIs and durable text-message sends with retry deduplication. M2b pushes newly committed messages to authorized sessions over Socket.IO. It rechecks membership and session expiry for each push and disconnects session tabs on logout or login rotation. Send remains REST; a duplicate retry does not emit again.
 
-Realtime currently uses WebSocket transport only; future browser clients must connect with `transports: ["websocket"]`. Vite proxies `/socket.io` to the backend. Missing messages during disconnection still require REST catch-up in M4. UI live-chat integration and the `/gif` picker remain M2c/M2d work; the whole M2 milestone is not complete.
+M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Presence, typing and unread counts are still demo-only.
+
+Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. Reconnect refreshes the conversation list; reopening a chat loads its latest history. Complete gap recovery during disconnection remains M4. The `/gif` picker remains M2d work; the whole M2 milestone is not complete.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -123,6 +125,6 @@ See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirem
 
 ## Limitations
 
-Live-chat UI, uploads, read receipts, calls, group APIs and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
+Uploads, read receipts, calls, group APIs and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
 
 No hosted release, production readiness or performance benchmark is claimed. Free hosting has quotas and may pause or sleep; verify current conditions before publishing a live demo.

@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-11. Status: M1 implemented; M2a REST/DB and M2b realtime delivery implemented. Live-chat UI and GIF integration remain pending.
+Updated: 2026-10-11. Status: M1 and M2a/M2b/M2c implemented. GIF integration remains M2d work.
 
 ## 1. Outcome and constraints
 

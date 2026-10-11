@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { searchUsers } from '../services/api.js';
 import {
   Search,
   Plus,
@@ -12,13 +13,26 @@ import {
 import { Modal, Avatar } from "./UI.jsx";
 import { people } from "../data.js";
 import { AVATARS } from "../model.js";
-export function ConversationDialog({ onClose, onDirect, onGroup }) {
+export function ConversationDialog({ onClose, onDirect, onGroup, live = false }) {
   const [tab, setTab] = useState("direct"),
     [search, setSearch] = useState(""),
     [name, setName] = useState(""),
     [members, setMembers] = useState([]),
     [error, setError] = useState("");
-  const list = people.filter(
+  const [results,setResults]=useState([]), [busy,setBusy]=useState(false), [searching,setSearching]=useState(false);
+  useEffect(()=>{
+    if (!live) return;
+    let cancelled=false;
+    setResults([]); setError('');
+    if (!search.trim()) { setSearching(false); return; }
+    setSearching(true);
+    // Ignore stale searches and debounce typing to avoid exhausting the search quota.
+    const timer=setTimeout(()=>searchUsers(search.trim()).then(({users})=>{
+      if (!cancelled) setResults(users.map(p=>({...p,name:p.displayName,avatar:p.avatarId})));
+    }).catch(err=>{if (!cancelled) setError(err.message);}).finally(()=>{if(!cancelled)setSearching(false);}),250);
+    return ()=>{cancelled=true;clearTimeout(timer);};
+  },[live,search]);
+  const list = live ? results : people.filter(
     (p) =>
       p.id !== "me" &&
       `${p.name} ${p.handle}`.toLowerCase().includes(search.toLowerCase()),
@@ -40,12 +54,12 @@ export function ConversationDialog({ onClose, onDirect, onGroup }) {
         >
           Direct message
         </button>
-        <button
+        {!live && <button
           className={tab === "group" ? "active" : ""}
           onClick={() => setTab("group")}
         >
           Group chat
-        </button>
+        </button>}
       </div>
       {tab === "group" && (
         <label className="field">
@@ -76,8 +90,12 @@ export function ConversationDialog({ onClose, onDirect, onGroup }) {
           <button
             className={`person-row ${members.includes(p.id) ? "picked" : ""}`}
             key={p.id}
+            disabled={busy}
             onClick={() => {
-              if (tab === "direct") onDirect(p);
+              if (tab === "direct") {
+                setBusy(true);
+                Promise.resolve(onDirect(p)).catch(err=>setError(err.message)).finally(()=>setBusy(false));
+              }
               else
                 setMembers((m) =>
                   m.includes(p.id)
@@ -90,7 +108,7 @@ export function ConversationDialog({ onClose, onDirect, onGroup }) {
             <span>
               <strong>{p.name}</strong>
               <small>
-                @{p.handle} · {p.online ? "Online" : "Offline"}
+                @{p.handle}{!live && ` · ${p.online ? 'Online' : 'Offline'}`}
               </small>
             </span>
             {tab === "group" ? (
@@ -109,7 +127,7 @@ export function ConversationDialog({ onClose, onDirect, onGroup }) {
         ))}
         {list.length === 0 && (
           <p className="dialog-description">
-            No teammates found. Try another name.
+            {searching ? 'Searching…' : live && !search.trim() ? 'Type a name or username to find a teammate.' : 'No teammates found. Try another name.'}
           </p>
         )}
       </div>
@@ -241,7 +259,7 @@ export function DetailsDialog({
           const p =
             id === "me"
               ? { ...profile, id: "me", online: true }
-              : people.find((p) => p.id === id);
+              : chat.live ? chat.peer : people.find((p) => p.id === id);
           return (
             <div className="person-row" key={id}>
               <Avatar name={p.avatar} online={p.online} />
@@ -253,7 +271,7 @@ export function DetailsDialog({
                 <small>
                   {chat.owner === id
                     ? "Owner"
-                    : p.online
+                    : chat.live ? 'Member' : p.online
                       ? "Online · Member"
                       : "Offline · Member"}
                 </small>

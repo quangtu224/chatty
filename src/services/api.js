@@ -37,6 +37,7 @@ export async function api(path, { method = "GET", body } = {}) {
     if (mutation) headers["X-CSRF-Token"] = token;
     const response = await fetch(`/api/v1${path}`, {
       method, headers, body: payload, credentials: "same-origin",
+      signal: AbortSignal.timeout(15_000), // A lost acknowledgement must eventually allow Retry.
     });
     if (response.ok && (response.status === 204 || method === "HEAD")) return null;
     let data;
@@ -68,3 +69,8 @@ export const updateMe = (fields) =>
   api("/me", { method: "PATCH", body: fields });
 export const searchUsers = (query) =>
   api(`/users?query=${encodeURIComponent(query)}`);
+export const getConversations = () => api('/conversations');
+export const openDirect = userId => api('/conversations/direct', {method:'POST', body:{userId}});
+export const getMessages = (id, beforeSeq) => api(`/conversations/${id}/messages${beforeSeq ? `?beforeSeq=${beforeSeq}` : ''}`);
+export const sendMessage = (id, message) => api(`/conversations/${id}/messages`, {method:'POST',body:message});
+export const searchGifs = query => api(`/gifs?query=${encodeURIComponent(query)}`);

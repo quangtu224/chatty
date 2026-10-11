@@ -336,6 +336,7 @@ export default function App() {
           key={chat?.id || 'empty'}
           onGifSend={live ? liveChat.send : undefined}
           onReloadHistory={live ? liveChat.reloadHistory : undefined}
+          onReadLatest={live ? liveChat.markRead : undefined}
           visible={mobileChat}
           chat={chat}
           profile={shownProfile}
@@ -344,7 +345,9 @@ export default function App() {
           onSend={send}
           onRetry={retry}
           onBack={() => setMobileChat(false)}
-          onDetails={() => setModal("details")}
+          // shortcut: live group details (members, leave, owner actions) arrive with M3c;
+          // until then the button is hidden so the demo-only dialog never acts on live data.
+          onDetails={live && chat?.type === "group" ? undefined : () => setModal("details")}
           onOlder={loadOlder}
           loadingOlder={live ? liveChat.loadingOlder : loadingOlder}
           network={live ? liveChat.network : network}

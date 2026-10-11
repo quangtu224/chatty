@@ -74,3 +74,5 @@ export const openDirect = userId => api('/conversations/direct', {method:'POST',
 export const getMessages = (id, beforeSeq) => api(`/conversations/${id}/messages${beforeSeq ? `?beforeSeq=${beforeSeq}` : ''}`);
 export const sendMessage = (id, message) => api(`/conversations/${id}/messages`, {method:'POST',body:message});
 export const searchGifs = query => api(`/gifs?query=${encodeURIComponent(query)}`);
+// Moves my read cursor forward; the server never moves it back.
+export const markRead = (id, seq) => api(`/conversations/${id}/read`, {method:'PUT', body:{seq}});

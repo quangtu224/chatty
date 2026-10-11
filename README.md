@@ -38,7 +38,7 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group, unread and presence APIs remain planned.
+There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group (M3a) and read-state (M3b) APIs exist; presence and typing remain planned.
 
 ### M1 development status
 
@@ -48,7 +48,9 @@ M1 is implemented: email/password accounts with public handles, Argon2id hashing
 
 M2a provides direct-conversation creation, list/history APIs and durable text-message sends with retry deduplication. M2b pushes newly committed messages to authorized sessions over Socket.IO. It rechecks membership and session expiry for each push and disconnects session tabs on logout or login rotation. Send remains REST; a duplicate retry does not emit again.
 
-M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Presence, typing and unread counts are still demo-only.
+M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Presence and typing are still demo-only.
+
+M3a/M3b add group REST endpoints (create, details, add/remove members, transfer ownership, leave/close) and per-member read cursors. Unread badges count other people's messages after your cursor. A chat is marked read only while it is on screen, the browser tab is visible and the history is scrolled to the newest message. Live groups appear in the sidebar and can be read and written; group details and membership controls in the UI arrive with M3c.
 
 M2d adds `/gif <query>`: Enter opens up to eight G-rated results above the composer. Click a result or use arrow keys and Enter to send; Escape cancels and keeps the command draft. An empty query shows a hint. GIF messages use the same durable send/retry path as text.
 

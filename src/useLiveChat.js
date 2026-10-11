@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { getMe, getConversations, openDirect, getMessages, sendMessage } from './services/api.js';
-import { mergeMessages, viewConversation } from './services/chat-model.js';
+import { getMe, getConversations, openDirect, getMessages, sendMessage, markRead as putRead } from './services/api.js';
+import { mergeMessages, viewConversation, latestSeq, countsAsUnread } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
@@ -69,7 +69,12 @@ export default function useLiveChat(user, active, notify, onExpired) {
     });
     socket.on('message:created', message => {
       // Known chats update immediately, even if an unrelated list request fails.
-      if(knownChats.current.some(c=>c.id===message.conversationId)) merge(message.conversationId,[message]);
+      // Raise the badge first: countsAsUnread compares against the state before the merge.
+      if(knownChats.current.some(c=>c.id===message.conversationId)) {
+        setChats(cs=>cs.map(c=>c.id===message.conversationId && countsAsUnread(c,message,user.id)
+          ? {...c,unreadCount:(c.unreadCount??0)+1} : c));
+        merge(message.conversationId,[message]);
+      }
       else refresh(token).then(()=>{ if (scope.current === token) merge(message.conversationId,[message]); }).catch(failed);
     });
     reload();
@@ -140,8 +145,24 @@ export default function useLiveChat(user, active, notify, onExpired) {
     } catch(err) { if (scope.current===token) report(err); }
     finally { if (scope.current===token) setLoadingOlder(false); }
   }
+  // Called by Chat only while the active chat is on screen, the tab is visible and the
+  // history is scrolled to the newest message. Updates the badge at once, then the server.
+  function markRead() {
+    const c=chats.find(item=>item.id===active), token=scope.current;
+    const seq=latestSeq(c?.messages);
+    if (!c || !seq || seq<=(c.lastReadSeq??0)) return;
+    setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:seq,unreadCount:0} : item));
+    putRead(c.id,seq).then(result=>{
+      if (scope.current!==token) return;
+      // Another tab may have read further; keep the higher cursor.
+      setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:Math.max(item.lastReadSeq??0,result.lastReadSeq)} : item));
+    }).catch(err=>{
+      // A failed read update is harmless: the next list refresh restores the true count.
+      if (scope.current===token && err.status===401) report(err);
+    });
+  }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

@@ -152,20 +152,33 @@ export function toMessage(row, prefix = "") {
 }
 
 // Conversations visible to userId: all of them, or only conversationId when given.
-// TODO(M3a): branch on row.type. Direct stays { id, type: "direct", peer, lastMessage };
-// group is { id, type: "group", name: row.name, ownerId: row.owner_id,
-//            memberCount: row.member_count, lastMessage }.
+// The SQL returns one row per conversation; the API shape depends on its type:
+//   direct: { id, type: "direct", peer, lastMessage }  (peer columns are the other user)
+//   group:  { id, type: "group", name, ownerId, memberCount, lastMessage }
+//           (peer columns are null for groups, so no peer is exposed)
 export async function listConversations(db, userId, conversationId = null) {
   const { rows } = await db.query(SQL.listConversations, [
     userId,
     conversationId,
   ]);
-  return rows.map((row) => ({
-    id: row.conversation_id,
-    type: "direct",
-    peer: toUser(row),
-    lastMessage: toMessage(row, "last_"),
-  }));
+  return rows.map((row) => {
+    const lastMessage = toMessage(row, "last_");
+    if (row.type === "group")
+      return {
+        id: row.conversation_id,
+        type: "group",
+        name: row.name,
+        ownerId: row.owner_id,
+        memberCount: row.member_count,
+        lastMessage,
+      };
+    return {
+      id: row.conversation_id,
+      type: "direct",
+      peer: toUser(row),
+      lastMessage,
+    };
+  });
 }
 
 // PostgreSQL integer limit; a larger beforeSeq would make the query itself fail (500).
@@ -280,17 +293,28 @@ export function conversationRoutes({
   router.post("/conversations/:id/messages", sendLimit, async (req, res) => {
     const { id } = req.params;
     if (!UUID.test(id)) return notFound(req, res);
-    const { clientMessageId, body, kind = 'text', gifId = null } = req.body ?? {};
+    const {
+      clientMessageId,
+      body,
+      kind = "text",
+      gifId = null,
+    } = req.body ?? {};
     const fieldErrors = {};
     if (typeof clientMessageId !== "string" || !UUID.test(clientMessageId))
       fieldErrors.clientMessageId =
         "Missing message id. Refresh and try again.";
     const bodyError = messageBodyError(body);
     if (bodyError) fieldErrors.body = bodyError;
-    if (!['text','gif'].includes(kind)) fieldErrors.kind = 'Choose text or GIF.';
+    if (!["text", "gif"].includes(kind))
+      fieldErrors.kind = "Choose text or GIF.";
     // Only an ID is stored; user-supplied URLs never reach the renderer.
-    if (kind === 'gif' ? typeof gifId !== 'string' || !/^[A-Za-z0-9]{1,100}$/.test(gifId) : gifId !== null)
-      fieldErrors.gifId = 'GIFs need a valid Giphy ID; text must not include one.';
+    if (
+      kind === "gif"
+        ? typeof gifId !== "string" || !/^[A-Za-z0-9]{1,100}$/.test(gifId)
+        : gifId !== null
+    )
+      fieldErrors.gifId =
+        "GIFs need a valid Giphy ID; text must not include one.";
     if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
 
     const me = req.user.id;

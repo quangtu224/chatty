@@ -76,3 +76,10 @@ export const sendMessage = (id, message) => api(`/conversations/${id}/messages`,
 export const searchGifs = query => api(`/gifs?query=${encodeURIComponent(query)}`);
 // Moves my read cursor forward; the server never moves it back.
 export const markRead = (id, seq) => api(`/conversations/${id}/read`, {method:'PUT', body:{seq}});
+// M3 groups. Details include members (public profiles) for groups and direct chats.
+export const getConversation = id => api(`/conversations/${id}`);
+export const createGroup = (name, memberIds) => api('/conversations/groups', {method:'POST', body:{name, memberIds}});
+export const addMembers = (id, userIds) => api(`/conversations/${id}/members`, {method:'POST', body:{userIds}});
+export const removeMember = (id, userId) => api(`/conversations/${id}/members/${userId}`, {method:'DELETE'});
+export const transferOwner = (id, userId) => api(`/conversations/${id}/transfer-owner`, {method:'POST', body:{userId}});
+export const leaveGroup = id => api(`/conversations/${id}/leave`, {method:'POST'});

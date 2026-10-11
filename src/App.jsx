@@ -52,6 +52,13 @@ export default function App() {
   const live = mode === "live";
   const liveChat = useLiveChat(live ? user : null, active, notify, () => {
     setUser(null); setMode('auth'); setModal(null); setActive(null);
+  }, (id, name) => {
+    // Removed from a group (or it was left in another tab): close it if it is open.
+    // useLiveChat calls the latest callback, so `active` is current here.
+    if (active === id) {
+      setActive(null); setMobileChat(false); setModal(null); setConfirmation(null);
+    }
+    notify(`You’re no longer in ${name}.`, '!');
   });
   const shownChats = live ? liveChat.chats : chats;
   const shownProfile = live
@@ -208,7 +215,13 @@ export default function App() {
     select(existing.id);
     setModal(null);
   }
-  function group(name, members) {
+  async function group(name, members) {
+    if (live) {
+      // Errors propagate to the dialog, which shows the server's message.
+      const id = await liveChat.group(name, members);
+      if (id) { select(id); setModal(null); notify("Your little workspace is ready."); }
+      return;
+    }
     const c = {
       id: crypto.randomUUID(),
       type: "group",
@@ -247,11 +260,24 @@ export default function App() {
       setLoadingOlder(false);
     }, 900);
   }
+  // Live confirmations run a request; failures become a toast (the dialog stays usable).
+  const attempt = (request, success) =>
+    request.then(() => success && notify(success), (err) => notify(err.message, "!"));
+  function transfer(id) {
+    const person = chat.people.find((p) => p.id === id);
+    setConfirmation({
+      title: "Make them the owner?",
+      text: `${person.name} will manage ${chat.name}. You’ll stay as a member.`,
+      action: () => attempt(liveChat.transfer(chat.id, id), "Ownership transferred."),
+    });
+  }
   function remove(id) {
+    const person = live ? chat.people.find((p) => p.id === id) : people.find((p) => p.id === id);
     setConfirmation({
       title: "Remove this teammate?",
-      text: `${people.find((p) => p.id === id).name} will no longer be part of ${chat.name}.`,
+      text: `${person.name} will no longer be part of ${chat.name}.`,
       action: () => {
+        if (live) return attempt(liveChat.remove(chat.id, id), "Member removed.");
         setChats((cs) =>
           cs.map((c) =>
             c.id === active
@@ -266,8 +292,16 @@ export default function App() {
   function leave() {
     setConfirmation({
       title: "Leave this group?",
-      text: `You’ll leave ${chat.name} and it will be removed from your conversation list.${chat.owner === "me" ? " Ownership will pass to the next member." : ""}`,
+      text: `You’ll leave ${chat.name} and it will be removed from your conversation list.${!live && chat.owner === "me" ? " Ownership will pass to the next member." : ""}`,
       action: () => {
+        if (live) {
+          const id = chat.id;
+          return attempt(liveChat.leave(id).then(() => {
+            setActive((current) => (current === id ? null : current));
+            setMobileChat(false);
+            setModal(null);
+          }), "You left the group.");
+        }
         setChats((cs) => cs.filter((c) => c.id !== active));
         setActive(null);
         setMobileChat(false);
@@ -345,9 +379,7 @@ export default function App() {
           onSend={send}
           onRetry={retry}
           onBack={() => setMobileChat(false)}
-          // shortcut: live group details (members, leave, owner actions) arrive with M3c;
-          // until then the button is hidden so the demo-only dialog never acts on live data.
-          onDetails={live && chat?.type === "group" ? undefined : () => setModal("details")}
+          onDetails={() => setModal("details")}
           onOlder={loadOlder}
           loadingOlder={live ? liveChat.loadingOlder : loadingOlder}
           network={live ? liveChat.network : network}
@@ -389,13 +421,21 @@ export default function App() {
           onMembers={() => setModal("members")}
           onRemove={remove}
           onLeave={leave}
+          onTransfer={live ? transfer : undefined}
         />
       )}{" "}
       {modal === "members" && chat && (
         <AddMembersDialog
           chat={chat}
+          live={live}
           onClose={() => setModal("details")}
-          onAdd={(ids) => {
+          onAdd={async (ids) => {
+            if (live) {
+              // Errors propagate to the dialog (e.g. group_full).
+              await liveChat.add(chat.id, ids);
+              setModal("details");
+              return notify("A few more minds in the room.");
+            }
             setChats((cs) =>
               cs.map((c) =>
                 c.id === active

@@ -38,7 +38,7 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group (M3a) and read-state (M3b) APIs exist; presence and typing remain planned.
+There is no lint, app-container or deployment script yet. Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Group (M3a), read-state (M3b) and group realtime (M3c) APIs exist; presence and typing remain planned.
 
 ### M1 development status
 
@@ -50,7 +50,7 @@ M2a provides direct-conversation creation, list/history APIs and durable text-me
 
 M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Presence and typing are still demo-only.
 
-M3a/M3b add group REST endpoints (create, details, add/remove members, transfer ownership, leave/close) and per-member read cursors. Unread badges count other people's messages after your cursor. A chat is marked read only while it is on screen, the browser tab is visible and the history is scrolled to the newest message. Live groups appear in the sidebar and can be read and written; group details and membership controls in the UI arrive with M3c.
+M3a/M3b add group REST endpoints (create, details, add/remove members, transfer ownership, leave/close) and per-member read cursors. Unread badges count other people's messages after your cursor. A chat is marked read only while it is on screen, the browser tab is visible and the history is scrolled to the newest message. M3c brings the live group UI: create groups, see real members and authors, and (as owner) add or remove members and transfer ownership; an owner must transfer before leaving. Changes push over Socket.IO: other members update without reloading, a removed member's tabs close the chat, and reading in one tab clears the badge in your other tabs.
 
 M2d adds `/gif <query>`: Enter opens up to eight G-rated results above the composer. Click a result or use arrow keys and Enter to send; Escape cancels and keeps the command draft. An empty query shows a hint. GIF messages use the same durable send/retry path as text.
 
@@ -130,6 +130,6 @@ See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirem
 
 ## Limitations
 
-Uploads, read receipts, calls, group APIs and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
+Uploads, read receipts for others, calls and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
 
 No hosted release, production readiness or performance benchmark is claimed. Free hosting has quotas and may pause or sleep; verify current conditions before publishing a live demo.

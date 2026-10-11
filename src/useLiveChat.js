@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { getMe, getConversations, openDirect, getMessages, sendMessage, markRead as putRead } from './services/api.js';
+import { getMe, getConversations, openDirect, getMessages, sendMessage, markRead as putRead,
+  getConversation, createGroup, addMembers, removeMember, transferOwner, leaveGroup } from './services/api.js';
 import { mergeMessages, viewConversation, latestSeq, countsAsUnread } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
-export default function useLiveChat(user, active, notify, onExpired) {
+// onRevoked(id, name) runs when another tab, the owner or the server removes my access.
+export default function useLiveChat(user, active, notify, onExpired, onRevoked) {
   const [chats, setChats] = useState([]), [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [network, setNetwork] = useState('reconnecting'), [error, setError] = useState('');
   const [historyVersion,setHistoryVersion]=useState(0);
   const knownChats=useRef(chats); knownChats.current=chats;
-  const scope = useRef(null), callbacks = useRef({notify,onExpired});
-  callbacks.current = {notify,onExpired};
+  const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked});
+  callbacks.current = {notify,onExpired,onRevoked};
+  // Groups this tab is leaving: their access-revoked push is expected, not news.
+  const leaving = useRef(new Set());
   const key = user ? `chatty.live-drafts.${user.id}` : null;
   function report(err) {
     if (err.status === 401) { clearDrafts(); callbacks.current.onExpired(); }
@@ -23,6 +27,31 @@ export default function useLiveChat(user, active, notify, onExpired) {
       messages:mergeMessages(c.messages ?? [], messages),
       lastMessage: [...messages, c.lastMessage].filter(Boolean).sort((a,b)=>b.seq-a.seq)[0],
     } : c));
+  }
+  // Inserts or updates one conversation from a details/create response. Server `members`
+  // (public profiles) are stored as memberProfiles; viewConversation derives the rest.
+  function upsert(conversation) {
+    const { members, ...rest } = conversation;
+    const extra = members ? { memberProfiles: members } : {};
+    setChats(cs => cs.some(c => c.id === rest.id)
+      ? cs.map(c => c.id === rest.id ? {...c, ...rest, ...extra,
+          lastMessage: c.lastMessage?.seq > (rest.lastMessage?.seq ?? 0) ? c.lastMessage : rest.lastMessage} : c)
+      : [{...rest, ...extra, messages: []}, ...cs]);
+  }
+  function drop(id) {
+    setChats(cs => cs.filter(c => c.id !== id));
+  }
+  // Background refresh of one conversation (events, opening a group). 404 means my access
+  // is gone; other failures stay quiet because the next list refresh repairs the view.
+  async function loadDetails(id, token = scope.current) {
+    try {
+      const { conversation } = await getConversation(id);
+      if (scope.current === token) upsert(conversation);
+    } catch (err) {
+      if (scope.current !== token) return;
+      if (err.status === 404) drop(id);
+      else if (err.status === 401) report(err);
+    }
   }
   async function refresh(token) {
     const { conversations } = await getConversations();
@@ -77,6 +106,24 @@ export default function useLiveChat(user, active, notify, onExpired) {
       }
       else refresh(token).then(()=>{ if (scope.current === token) merge(message.conversationId,[message]); }).catch(failed);
     });
+    // Group changed (created, members, owner): refetch my view of it; new groups appear.
+    socket.on('conversation:updated', ({ conversationId }) => loadDetails(conversationId, token));
+    socket.on('conversation:access-revoked', ({ conversationId }) => {
+      const known = knownChats.current.find(c => c.id === conversationId);
+      drop(conversationId);
+      if (known && !leaving.current.has(conversationId))
+        callbacks.current.onRevoked?.(conversationId, known.name);
+    });
+    // Another tab of mine read this chat. Fully read: clear at once; otherwise the exact
+    // count needs the server (only it knows who sent the messages I have not loaded).
+    socket.on('read:updated', ({ conversationId, lastReadSeq }) => {
+      const c = knownChats.current.find(item => item.id === conversationId);
+      if (!c || lastReadSeq <= (c.lastReadSeq ?? 0)) return;
+      if (lastReadSeq >= Math.max(latestSeq(c.messages), c.lastMessage?.seq ?? 0))
+        setChats(cs => cs.map(item => item.id === conversationId
+          ? {...item, lastReadSeq: Math.max(item.lastReadSeq ?? 0, lastReadSeq), unreadCount: 0} : item));
+      else loadDetails(conversationId, token);
+    });
     reload();
     return () => { scope.current = null; socket.disconnect(); };
   }, [user?.id]);
@@ -84,6 +131,8 @@ export default function useLiveChat(user, active, notify, onExpired) {
     if (!user || !active) return;
     const token = scope.current; let cancelled = false;
     setChats(cs=>cs.map(c=>c.id===active ? {...c,historyLoading:true,historyError:''} : c));
+    // Groups need member profiles for author names and the details dialog.
+    if (knownChats.current.find(c=>c.id===active)?.type==='group') loadDetails(active, token);
     getMessages(active).then(page => {
       if (cancelled || scope.current !== token) return;
       setChats(cs=>cs.map(c=>c.id===active ? {...c,messages:mergeMessages(c.messages??[],page.messages),hasMore:page.hasMore,historyLoading:false} : c));
@@ -161,8 +210,35 @@ export default function useLiveChat(user, active, notify, onExpired) {
       if (scope.current===token && err.status===401) report(err);
     });
   }
+  // Group actions. Each resolves after the server confirmed; errors reach the caller.
+  async function group(name, memberIds) {
+    const token=scope.current;
+    const {conversation}=await createGroup(name, memberIds);
+    if (scope.current!==token) return null;
+    upsert(conversation);
+    return conversation.id;
+  }
+  async function add(id, userIds) {
+    const {conversation}=await addMembers(id, userIds);
+    upsert(conversation);
+  }
+  async function remove(id, userId) {
+    await removeMember(id, userId);
+    await loadDetails(id);
+  }
+  async function transfer(id, userId) {
+    const {conversation}=await transferOwner(id, userId);
+    upsert(conversation);
+  }
+  async function leave(id) {
+    leaving.current.add(id);
+    try {
+      await leaveGroup(id);
+      drop(id);
+    } finally { leaving.current.delete(id); }
+  }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>viewConversation(c,user?.id)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

@@ -5,6 +5,7 @@ import {
   Plus,
   Check,
   UserMinus,
+  Crown,
   LogOut,
   Wifi,
   WifiOff,
@@ -13,13 +14,9 @@ import {
 import { Modal, Avatar } from "./UI.jsx";
 import { people } from "../data.js";
 import { AVATARS } from "../model.js";
-export function ConversationDialog({ onClose, onDirect, onGroup, live = false }) {
-  const [tab, setTab] = useState("direct"),
-    [search, setSearch] = useState(""),
-    [name, setName] = useState(""),
-    [members, setMembers] = useState([]),
-    [error, setError] = useState("");
-  const [results,setResults]=useState([]), [busy,setBusy]=useState(false), [searching,setSearching]=useState(false);
+// Live user search shared by the new-conversation and add-members dialogs.
+function useUserSearch(live, search, setError) {
+  const [results,setResults]=useState([]), [searching,setSearching]=useState(false);
   useEffect(()=>{
     if (!live) return;
     let cancelled=false;
@@ -32,7 +29,26 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
     }).catch(err=>{if (!cancelled) setError(err.message);}).finally(()=>{if(!cancelled)setSearching(false);}),250);
     return ()=>{cancelled=true;clearTimeout(timer);};
   },[live,search]);
-  const list = live ? results : people.filter(
+  return {results,searching};
+}
+// Picked people stay listed (first) while the search text changes.
+const withPicked = (picked, results) =>
+  [...picked, ...results.filter(p => !picked.some(q => q.id === p.id))];
+// Adds or removes one person from a picked list.
+const toggle = (list, item, same = (a) => a === item) =>
+  list.some(same) ? list.filter((a) => !same(a)) : [...list, item];
+// Prefer a field message from the server (e.g. memberIds) over the generic one.
+const errorText = (err) => Object.values(err.fieldErrors ?? {})[0] ?? err.message;
+
+export function ConversationDialog({ onClose, onDirect, onGroup, live = false }) {
+  const [tab, setTab] = useState("direct"),
+    [search, setSearch] = useState(""),
+    [name, setName] = useState(""),
+    [members, setMembers] = useState([]),
+    [error, setError] = useState("");
+  const [busy,setBusy]=useState(false), [picked,setPicked]=useState([]);
+  const {results,searching}=useUserSearch(live,search,setError);
+  const list = live ? (tab === "group" ? withPicked(picked, results) : results) : people.filter(
     (p) =>
       p.id !== "me" &&
       `${p.name} ${p.handle}`.toLowerCase().includes(search.toLowerCase()),
@@ -54,12 +70,12 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
         >
           Direct message
         </button>
-        {!live && <button
+        <button
           className={tab === "group" ? "active" : ""}
           onClick={() => setTab("group")}
         >
           Group chat
-        </button>}
+        </button>
       </div>
       {tab === "group" && (
         <label className="field">
@@ -96,12 +112,10 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
                 setBusy(true);
                 Promise.resolve(onDirect(p)).catch(err=>setError(err.message)).finally(()=>setBusy(false));
               }
-              else
-                setMembers((m) =>
-                  m.includes(p.id)
-                    ? m.filter((id) => id !== p.id)
-                    : [...m, p.id],
-                );
+              else {
+                setMembers((m) => toggle(m, p.id));
+                setPicked((list) => toggle(list, p, (q) => q.id === p.id));
+              }
             }}
           >
             <Avatar name={p.avatar} online={p.online} />
@@ -141,11 +155,18 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
           <span>{members.length} selected</span>
           <button
             className="btn btn-primary"
+            disabled={busy}
             onClick={() => {
               if (!name.trim()) setError("Give your group a name.");
               else if (!members.length)
                 setError("Choose at least one teammate.");
-              else onGroup(name.trim(), members);
+              else {
+                // Live creation is async: the server's message appears here on failure.
+                setBusy(true);
+                Promise.resolve(onGroup(name.trim(), members))
+                  .catch((err) => setError(errorText(err)))
+                  .finally(() => setBusy(false));
+              }
             }}
           >
             Create group <Plus size={16} />
@@ -233,8 +254,11 @@ export function DetailsDialog({
   onMembers,
   onRemove,
   onLeave,
+  onTransfer,
 }) {
   const owner = chat.owner === "me";
+  // The live server refuses an owner leaving while others remain (transfer_required).
+  const mustTransfer = chat.live && owner && chat.members.length > 1;
   return (
     <Modal
       title={chat.type === "group" ? "Group details" : "Contact details"}
@@ -250,16 +274,21 @@ export function DetailsDialog({
       </div>
       <div className="section-label">
         {chat.type === "group"
-          ? `${chat.members.length} members`
+          ? (chat.live ? `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}` : `${chat.members.length} members`)
           : "In this conversation"}
         {owner && <span>You’re the owner</span>}
       </div>
+      {chat.live && chat.type === "group" && !chat.people && (
+        <p className="dialog-description" role="status">Loading members…</p>
+      )}
       <div className="member-picker">
         {chat.members.map((id) => {
           const p =
             id === "me"
               ? { ...profile, id: "me", online: chat.live ? undefined : true }
-              : chat.live ? chat.peer : people.find((p) => p.id === id);
+              : chat.live
+                ? chat.peer ?? chat.people.find((p) => p.id === id)
+                : people.find((p) => p.id === id);
           return (
             <div className="person-row" key={id}>
               <Avatar name={p.avatar} online={p.online} />
@@ -276,6 +305,16 @@ export function DetailsDialog({
                       : "Offline · Member"}
                 </small>
               </span>
+              {owner && id !== "me" && onTransfer && (
+                <button
+                  className="icon-button"
+                  aria-label={`Make ${p.name} the owner`}
+                  title="Make owner"
+                  onClick={() => onTransfer(id)}
+                >
+                  <Crown size={17} />
+                </button>
+              )}
               {owner && id !== "me" && (
                 <button
                   className="icon-button remove-button"
@@ -296,32 +335,53 @@ export function DetailsDialog({
               <Plus size={16} /> Add members
             </button>
           )}
-          <button className="btn danger-button" onClick={onLeave}>
+          <button className="btn danger-button" onClick={onLeave} disabled={mustTransfer}>
             <LogOut size={15} /> Leave group
           </button>
           {owner && (
-            <small>If you leave, ownership passes to the next member.</small>
+            <small>
+              {mustTransfer
+                ? "Make someone else the owner before you leave."
+                : chat.live
+                  ? "You’re the last member: leaving closes the group."
+                  : "If you leave, ownership passes to the next member."}
+            </small>
           )}
         </div>
       )}
     </Modal>
   );
 }
-export function AddMembersDialog({ chat, onClose, onAdd }) {
-  const [ids, setIds] = useState([]);
-  const available = people.filter((p) => !chat.members.includes(p.id));
+export function AddMembersDialog({ chat, onClose, onAdd, live = false }) {
+  const [ids, setIds] = useState([]), [picked, setPicked] = useState([]);
+  const [search, setSearch] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const {results,searching}=useUserSearch(live,search,setError);
+  // Live: search real users, without current members; demo: the fixture people.
+  const available = live
+    ? withPicked(picked, results.filter((p) => !chat.members.includes(p.id)))
+    : people.filter((p) => !chat.members.includes(p.id));
   return (
     <Modal title="Invite a few more minds" onClose={onClose}>
       <p className="dialog-description">Add teammates to {chat.name}.</p>
+      {live && (
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            aria-label="Search teammates"
+            placeholder="Search by name or username…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      )}
       {available.map((p) => (
         <button
           className="person-row"
           key={p.id}
-          onClick={() =>
-            setIds((a) =>
-              a.includes(p.id) ? a.filter((id) => id !== p.id) : [...a, p.id],
-            )
-          }
+          onClick={() => {
+            setIds((a) => toggle(a, p.id));
+            setPicked((list) => toggle(list, p, (q) => q.id === p.id));
+          }}
         >
           <Avatar name={p.avatar} />
           <span>
@@ -333,15 +393,31 @@ export function AddMembersDialog({ chat, onClose, onAdd }) {
           </span>
         </button>
       ))}
-      {available.length === 0 && <p>Everyone’s already here!</p>}
+      {available.length === 0 && (
+        <p className="dialog-description">
+          {!live
+            ? "Everyone’s already here!"
+            : searching
+              ? "Searching…"
+              : search.trim()
+                ? "No teammates found. Try another name."
+                : "Type a name or username to find a teammate."}
+        </p>
+      )}
+      {error && <p className="field-error" role="alert">{error}</p>}
       <div className="dialog-footer">
         <button className="btn btn-outline-secondary" onClick={onClose}>
           Cancel
         </button>
         <button
           className="btn btn-primary"
-          disabled={!ids.length}
-          onClick={() => onAdd(ids)}
+          disabled={!ids.length || busy}
+          onClick={() => {
+            setBusy(true);
+            Promise.resolve(onAdd(ids))
+              .catch((err) => setError(errorText(err)))
+              .finally(() => setBusy(false));
+          }}
         >
           Add {ids.length || ""} members
         </button>

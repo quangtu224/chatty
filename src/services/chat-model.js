@@ -29,7 +29,10 @@ export function countsAsUnread(chat, message, userId) {
 }
 
 export function viewConversation(c, userId) {
-  // Direct chats have a peer; groups (M3a) do not. Full group UI arrives in M3c.
+  // Direct chats have a peer; groups do not. Group member profiles (memberProfiles) are
+  // loaded from GET /conversations/:id when the group is opened or changes; until then
+  // `people` is null and authors show a neutral label.
+  const profiles = c.memberProfiles?.map(p => ({ ...p, name: p.displayName, avatar: p.avatarId })) ?? null;
   const peer = c.peer
     ? { ...c.peer, name: c.peer.displayName, avatar: c.peer.avatarId }
     : null;
@@ -39,7 +42,10 @@ export function viewConversation(c, userId) {
     date: new Date(m.createdAt).toLocaleDateString([], {year:'numeric',month:'long',day:'numeric'}),
   }));
   return { ...c, live:true, name:peer?.name ?? c.name, avatar:peer?.avatar ?? 'forest', peer,
-    members: peer ? ['me',peer.id] : [], messages,
+    // Same conventions as the demo data: "me" stands for the signed-in user.
+    members: peer ? ['me',peer.id] : (profiles ?? []).map(p => p.id === userId ? 'me' : p.id),
+    owner: c.ownerId === userId ? 'me' : c.ownerId ?? null,
+    people: profiles, messages,
     // Server-computed count of others' messages after my cursor (kept current locally).
     unread: c.unreadCount ?? 0,
     olderLoaded: c.hasMore === false,

@@ -117,14 +117,13 @@ export default function Chat({
           </h1>
           <p>
             {!chat.live && <i className={online ? "status-online" : "status-offline"} />}
-            {chat.live ? (chat.peer ? `@${chat.peer.handle}` : `${chat.memberCount} members`) : chat.type === "group"
+            {chat.live ? (chat.peer ? `@${chat.peer.handle}` : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}`) : chat.type === "group"
               ? `${chat.members.length} members · ${online} online`
               : online
                 ? "Online · Here to chat"
                 : "Offline · Back soon"}
           </p>
         </div>
-        {/* Hidden when no handler is given (live groups until the M3c details dialog). */}
         {onDetails && <button
           className="btn btn-outline-secondary details-button"
           aria-label={
@@ -203,8 +202,10 @@ export default function Chat({
               m.author === "me"
                 ? profile
                 : chat.live
-                  // Group member profiles arrive with the M3c group UI; until then a neutral label.
-                  ? chat.peer ?? { name: "Member", avatar: "forest" }
+                  // Group authors come from the loaded member profiles. Someone who left the
+                  // group is no longer listed; before profiles load, a neutral label.
+                  ? chat.peer ?? chat.people?.find((p) => p.id === m.author) ??
+                    { name: chat.people ? "Former member" : "Member", avatar: "forest" }
                   : people.find((p) => p.id === m.author) || people[1];
             const outgoing = m.author === "me";
             const grouped =

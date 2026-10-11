@@ -178,8 +178,8 @@ export function toMessage(row, prefix = "") {
 //   direct: { id, type: "direct", peer, lastMessage }  (peer columns are the other user)
 //   group:  { id, type: "group", name, ownerId, memberCount, lastMessage }
 //           (peer columns are null for groups, so no peer is exposed)
-// TODO(M3b): add lastReadSeq: row.last_read_seq and unreadCount: row.unread_count to
-// BOTH shapes (direct and group).
+// Both shapes also carry my read state: lastReadSeq (my cursor) and unreadCount
+// (other people's messages after it).
 export async function listConversations(db, userId, conversationId = null) {
   const { rows } = await db.query(SQL.listConversations, [
     userId,
@@ -187,6 +187,10 @@ export async function listConversations(db, userId, conversationId = null) {
   ]);
   return rows.map((row) => {
     const lastMessage = toMessage(row, "last_");
+    const readState = {
+      lastReadSeq: row.last_read_seq,
+      unreadCount: row.unread_count,
+    };
     if (row.type === "group")
       return {
         id: row.conversation_id,
@@ -195,12 +199,14 @@ export async function listConversations(db, userId, conversationId = null) {
         ownerId: row.owner_id,
         memberCount: row.member_count,
         lastMessage,
+        ...readState,
       };
     return {
       id: row.conversation_id,
       type: "direct",
       peer: toUser(row),
       lastMessage,
+      ...readState,
     };
   });
 }
@@ -376,13 +382,24 @@ export function conversationRoutes({
     res.status(result.created ? 201 : 200).json({ message });
   });
 
-  // TODO(M3b): PUT /conversations/:id/read { seq }  ->  200 { lastReadSeq }
-  //   non-UUID id -> 404; seq must be a whole number >= 0 (typeof number,
-  //   Number.isInteger) else 400 fieldErrors.seq; SQL.isMember (no row -> 404);
-  //   SQL.markRead with [id, me, seq]: no row -> 400 fieldErrors.seq (beyond the newest
-  //   message); otherwise respond with the returned last_read_seq (may be higher than seq).
+  // Move my read cursor forward: 200 { lastReadSeq }. The answer may be higher than the
+  // requested seq when another tab already read further (the cursor never moves back).
   router.put("/conversations/:id/read", async (req, res) => {
-    throw new Error("TODO: PUT /conversations/:id/read");
+    const { id } = req.params;
+    if (!UUID.test(id)) return notFound(req, res);
+    const seq = req.body?.seq;
+    // JSON numbers only ("3" is rejected); MAX_SEQ keeps the value inside PostgreSQL's
+    // integer range, otherwise the query itself would fail with a 500.
+    const seqError = { seq: "Use a whole number from 0 to the newest message." };
+    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0 || seq > MAX_SEQ)
+      return invalid(req, res, seqError);
+    const me = req.user.id;
+    // Membership first, so outsiders get 404 rather than learning anything from a 400.
+    if (!(await pool.query(SQL.isMember, [id, me])).rowCount) return notFound(req, res);
+    const { rows } = await pool.query(SQL.markRead, [id, me, seq]);
+    // No row: the member exists, so the seq was beyond the newest stored message.
+    if (!rows[0]) return invalid(req, res, seqError);
+    res.json({ lastReadSeq: rows[0].last_read_seq });
   });
 
   return router;

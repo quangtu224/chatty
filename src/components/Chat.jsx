@@ -13,7 +13,7 @@ import {
 import { Avatar, IconButton, EmptyState, SafeText } from "./UI.jsx";
 import { people } from "../data.js";
 import GifPicker from './GifPicker.jsx';
-import { gifUrl } from '../services/chat-model.js';
+import { gifUrl, typingText } from '../services/chat-model.js';
 export default function Chat({
   chat,
   profile,
@@ -30,6 +30,7 @@ export default function Chat({
   visible,
   onGifSend,
   onReloadHistory,
+  onReadLatest,
 }) {
   const history = useRef(null),
     bottom = useRef(null),
@@ -61,7 +62,21 @@ export default function Chat({
     }
     if (!away && preserve.current === null)
       bottom.current?.scrollIntoView({ block: "end" });
-  }, [chat?.messages.length, typing]);
+  }, [chat?.messages.length, typing?.length]);
+  // Live read receipts for myself: report "read up to the newest message" only while
+  // this chat is really on screen (not hidden by the mobile layout), the browser tab is
+  // visible and the history is scrolled to the bottom. Runs again when new messages
+  // arrive, when scrolling back down and when the tab becomes visible.
+  useEffect(() => {
+    if (!onReadLatest) return;
+    const check = () => {
+      const shown = history.current?.getClientRects().length > 0;
+      if (shown && !away && document.visibilityState === "visible") onReadLatest();
+    };
+    check();
+    document.addEventListener("visibilitychange", check);
+    return () => document.removeEventListener("visibilitychange", check);
+  }, [onReadLatest, chat?.id, chat?.messages.length, away, visible]);
   if (!chat)
     return (
       <main className="chat-main">
@@ -101,15 +116,20 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            {!chat.live && <i className={online ? "status-online" : "status-offline"} />}
-            {chat.live ? `@${chat.peer.handle}` : chat.type === "group"
+            {/* Live: presence from sockets (M3d); demo: fixture people. */}
+            {chat.live ? (chat.peer && <i className={chat.peer.online ? "status-online" : "status-offline"} />)
+              : <i className={online ? "status-online" : "status-offline"} />}
+            {chat.live ? (chat.peer
+              ? `${chat.peer.online ? "Online" : "Offline"} · @${chat.peer.handle}`
+              : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}${chat.people ? ` · ${chat.onlineCount} online` : ""}`)
+              : chat.type === "group"
               ? `${chat.members.length} members · ${online} online`
               : online
                 ? "Online · Here to chat"
                 : "Offline · Back soon"}
           </p>
         </div>
-        <button
+        {onDetails && <button
           className="btn btn-outline-secondary details-button"
           aria-label={
             chat.type === "group" ? "Group details" : "Contact details"
@@ -120,7 +140,7 @@ export default function Chat({
           <span>
             {chat.type === "group" ? "Group details" : "Contact details"}
           </span>
-        </button>
+        </button>}
       </header>
       {network !== "online" && (
         <div className="network-banner" role="status">
@@ -130,7 +150,8 @@ export default function Chat({
             : "Reconnecting… Getting the conversation back on track."}
         </div>
       )}
-      {chat.type === "group" && (
+      {/* Demo groups have a description; live groups do not store one. */}
+      {chat.type === "group" && chat.description && (
         <div className="topic-banner">
           <Pin size={16} />
           <span>{chat.description}</span>
@@ -185,7 +206,12 @@ export default function Chat({
             const person =
               m.author === "me"
                 ? profile
-                : chat.live ? chat.peer : people.find((p) => p.id === m.author) || people[1];
+                : chat.live
+                  // Group authors come from the loaded member profiles. Someone who left the
+                  // group is no longer listed; before profiles load, a neutral label.
+                  ? chat.peer ?? chat.people?.find((p) => p.id === m.author) ??
+                    { name: chat.people ? "Former member" : "Member", avatar: "forest" }
+                  : people.find((p) => p.id === m.author) || people[1];
             const outgoing = m.author === "me";
             const grouped =
               i > 0 &&
@@ -279,10 +305,11 @@ export default function Chat({
         {gifQuery !== null && <GifPicker query={gifQuery} onCancel={()=>{setGifQuery(null);textarea.current?.focus();}}
           onSelect={gif=>{setAway(false);onGifSend(gif);setGifQuery(null);textarea.current?.focus();}} />}
         <div className="typing" aria-live="polite">
-          {typing && (
+          {/* typing: the people typing here (live members or the demo's Alice). */}
+          {typing?.length > 0 && (
             <>
-              <Avatar name="fox" size={23} />
-              <span>Alice is typing</span>
+              <Avatar name={typing[0].avatar} size={23} />
+              <span>{typingText(typing)}</span>
               <span className="typing-dots">•••</span>
             </>
           )}

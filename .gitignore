@@ -21,6 +21,7 @@ Thumbs.db
 coverage/
 playwright-report/
 test-results/
+.playwright-mcp/
 
 # Private design references/prompts; public/avatars are runtime assets.
 /design/

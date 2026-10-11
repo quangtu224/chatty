@@ -16,6 +16,7 @@ import {
   verifyPassword,
 } from "./auth.js";
 import { conversationRoutes } from "./conversations.js";
+import { groupRoutes } from "./groups.js";
 import { gifSearch } from './gifs.js';
 import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
@@ -57,6 +58,11 @@ export function createApp({
   secureCookies = false,
   onMessage = async () => {},
   onSessionRevoked = () => {},
+  // M3c pushes, called after COMMIT (see realtime.js for the event contract).
+  // onGroupChanged(conversationId, revokedUserIds = []) and
+  // onRead(userId, conversationId, lastReadSeq).
+  onGroupChanged = async () => {},
+  onRead = async () => {},
   giphyApiKey = process.env.GIPHY_API_KEY,
   gifFetch = fetch,
   gifRateLimit = {windowMs:60_000,max:20},
@@ -201,7 +207,8 @@ export function createApp({
     });
   });
 
-  v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage }));
+  v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage, onRead }));
+  v1.use(groupRoutes({ pool, auth, onGroupChanged }));
   // Separate quota: a provider outage cannot block ordinary text chat.
   v1.get('/gifs',auth,rateLimit(gifRateLimit),gifSearch({apiKey:giphyApiKey,fetchGifs:gifFetch}));
 

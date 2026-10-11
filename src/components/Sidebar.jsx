@@ -47,7 +47,11 @@ export default function Sidebar({
         )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
-        {(onDemo ? ["group", "direct"] : ["direct"]).map((type) => (
+        {/* Live mode shows the group section once the account belongs to a group (M3a). */}
+        {(onDemo || chats.some((c) => c.type === "group")
+          ? ["group", "direct"]
+          : ["direct"]
+        ).map((type) => (
           <section key={type}>
             <div className="section-label">
               {type === "group" ? "Group chats" : "Direct messages"}
@@ -64,7 +68,9 @@ export default function Sidebar({
                   <Avatar
                     name={c.avatar}
                     online={
-                      !c.live && type === "direct"
+                      c.live
+                        ? c.peer?.online
+                        : type === "direct"
                         ? people.find(
                             (p) => c.members.includes(p.id) && p.id !== "me",
                           )?.online

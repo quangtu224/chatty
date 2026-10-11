@@ -95,6 +95,8 @@ export function sendError(req, res, status, code, message, fieldErrors) {
 
 export function requireUser(pool) {
   return async (req, res, next) => {
+    // Several routers guard /conversations; the session is looked up once per request.
+    if (req.user) return next();
     try {
       req.user = await findSessionUser(
         pool,

@@ -32,10 +32,21 @@ export const UUID =
 // ---------------------------------------------------------------------------
 export const SQL = {
   // Conversations visible to a user ($1), optionally only one of them ($2, or null for all).
-  // Columns: conversation_id; the peer as id/handle/display_name/avatar_id (so toUser(row)
-  // works directly); the latest message with a "last_" prefix (all null when there is none).
+  // Columns: conversation_id, type, name, owner_id, member_count; for direct chats the peer
+  // as id/handle/display_name/avatar_id (so toUser(row) works directly; all null for groups);
+  // the latest message with a "last_" prefix (all null when there is none);
+  // last_read_seq (my read cursor) and unread_count (others' messages after it).
   listConversations: `
-    SELECT c.id AS conversation_id,
+    SELECT c.id AS conversation_id, c.type, c.name, c.owner_id,
+           (SELECT count(*)::int FROM chatty.conversation_members cm
+            WHERE cm.conversation_id = c.id) AS member_count,
+           me.last_read_seq,
+           -- Messages after my cursor that someone else sent. My own messages never count
+           -- as unread. Reads a seq range of the (conversation_id, seq) index.
+           (SELECT count(*)::int FROM chatty.messages um
+            WHERE um.conversation_id = c.id
+              AND um.seq > me.last_read_seq
+              AND um.sender_id <> me.user_id) AS unread_count,
            peer.id, peer.handle, peer.display_name, peer.avatar_id,
            last.id                AS last_id,
            last.conversation_id   AS last_conversation_id,
@@ -48,9 +59,15 @@ export const SQL = {
            last.created_at        AS last_created_at
     FROM chatty.conversation_members me                      -- start from MY memberships
     JOIN chatty.conversations c ON c.id = me.conversation_id
-    JOIN chatty.conversation_members other                   -- the other person in the chat
-      ON other.conversation_id = c.id AND other.user_id <> me.user_id
-    JOIN chatty.users peer ON peer.id = other.user_id
+    -- The other person, for direct chats only. A plain JOIN would repeat a group once per
+    -- member; LATERAL ... LIMIT 1 with LEFT JOIN keeps exactly one row per conversation.
+    LEFT JOIN LATERAL (
+      SELECT u.* FROM chatty.conversation_members other
+      JOIN chatty.users u ON u.id = other.user_id
+      WHERE c.type = 'direct'
+        AND other.conversation_id = c.id AND other.user_id <> me.user_id
+      LIMIT 1
+    ) peer ON true
     -- LATERAL runs the subquery once per conversation: its newest message, if any.
     -- The unique (conversation_id, seq) index lets it read a single index entry.
     LEFT JOIN LATERAL (
@@ -120,6 +137,20 @@ export const SQL = {
     VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
   bumpSeq: `UPDATE chatty.conversations SET next_seq = next_seq + 1 WHERE id = $1`,
+
+  // Moves my read cursor ($1 conversation, $2 me, $3 seq) forward, never back:
+  // GREATEST keeps the larger value, so a late or out-of-order request cannot "unread"
+  // messages, and two tabs updating at once both end at the higher value (one atomic UPDATE).
+  // "$3 < next_seq" rejects cursors beyond the newest stored message (no row comes back).
+  // Returns the cursor after the update. Run SQL.isMember first to tell 404 from 400.
+  markRead: `
+    UPDATE chatty.conversation_members cm
+    SET last_read_seq = GREATEST(cm.last_read_seq, $3::int)
+    FROM chatty.conversations c
+    WHERE c.id = cm.conversation_id
+      AND cm.conversation_id = $1 AND cm.user_id = $2
+      AND $3::int < c.next_seq
+    RETURNING cm.last_read_seq`,
 };
 
 // DB row -> API message. `prefix` reads prefixed columns, e.g. toMessage(row, "last_")
@@ -143,17 +174,41 @@ export function toMessage(row, prefix = "") {
 }
 
 // Conversations visible to userId: all of them, or only conversationId when given.
-async function listConversations(db, userId, conversationId = null) {
+// The SQL returns one row per conversation; the API shape depends on its type:
+//   direct: { id, type: "direct", peer, lastMessage }  (peer columns are the other user)
+//   group:  { id, type: "group", name, ownerId, memberCount, lastMessage }
+//           (peer columns are null for groups, so no peer is exposed)
+// Both shapes also carry my read state: lastReadSeq (my cursor) and unreadCount
+// (other people's messages after it).
+export async function listConversations(db, userId, conversationId = null) {
   const { rows } = await db.query(SQL.listConversations, [
     userId,
     conversationId,
   ]);
-  return rows.map((row) => ({
-    id: row.conversation_id,
-    type: "direct",
-    peer: toUser(row),
-    lastMessage: toMessage(row, "last_"),
-  }));
+  return rows.map((row) => {
+    const lastMessage = toMessage(row, "last_");
+    const readState = {
+      lastReadSeq: row.last_read_seq,
+      unreadCount: row.unread_count,
+    };
+    if (row.type === "group")
+      return {
+        id: row.conversation_id,
+        type: "group",
+        name: row.name,
+        ownerId: row.owner_id,
+        memberCount: row.member_count,
+        lastMessage,
+        ...readState,
+      };
+    return {
+      id: row.conversation_id,
+      type: "direct",
+      peer: toUser(row),
+      lastMessage,
+      ...readState,
+    };
+  });
 }
 
 // PostgreSQL integer limit; a larger beforeSeq would make the query itself fail (500).
@@ -172,6 +227,7 @@ export function conversationRoutes({
   auth,
   sendLimit,
   onMessage = async () => {},
+  onRead = async () => {},
 }) {
   const router = express.Router();
   // Every conversation route needs a signed-in user (sets req.user).
@@ -268,17 +324,28 @@ export function conversationRoutes({
   router.post("/conversations/:id/messages", sendLimit, async (req, res) => {
     const { id } = req.params;
     if (!UUID.test(id)) return notFound(req, res);
-    const { clientMessageId, body, kind = 'text', gifId = null } = req.body ?? {};
+    const {
+      clientMessageId,
+      body,
+      kind = "text",
+      gifId = null,
+    } = req.body ?? {};
     const fieldErrors = {};
     if (typeof clientMessageId !== "string" || !UUID.test(clientMessageId))
       fieldErrors.clientMessageId =
         "Missing message id. Refresh and try again.";
     const bodyError = messageBodyError(body);
     if (bodyError) fieldErrors.body = bodyError;
-    if (!['text','gif'].includes(kind)) fieldErrors.kind = 'Choose text or GIF.';
+    if (!["text", "gif"].includes(kind))
+      fieldErrors.kind = "Choose text or GIF.";
     // Only an ID is stored; user-supplied URLs never reach the renderer.
-    if (kind === 'gif' ? typeof gifId !== 'string' || !/^[A-Za-z0-9]{1,100}$/.test(gifId) : gifId !== null)
-      fieldErrors.gifId = 'GIFs need a valid Giphy ID; text must not include one.';
+    if (
+      kind === "gif"
+        ? typeof gifId !== "string" || !/^[A-Za-z0-9]{1,100}$/.test(gifId)
+        : gifId !== null
+    )
+      fieldErrors.gifId =
+        "GIFs need a valid Giphy ID; text must not include one.";
     if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
 
     const me = req.user.id;
@@ -314,6 +381,32 @@ export function conversationRoutes({
       }
     }
     res.status(result.created ? 201 : 200).json({ message });
+  });
+
+  // Move my read cursor forward: 200 { lastReadSeq }. The answer may be higher than the
+  // requested seq when another tab already read further (the cursor never moves back).
+  router.put("/conversations/:id/read", async (req, res) => {
+    const { id } = req.params;
+    if (!UUID.test(id)) return notFound(req, res);
+    const seq = req.body?.seq;
+    // JSON numbers only ("3" is rejected); MAX_SEQ keeps the value inside PostgreSQL's
+    // integer range, otherwise the query itself would fail with a 500.
+    const seqError = { seq: "Use a whole number from 0 to the newest message." };
+    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0 || seq > MAX_SEQ)
+      return invalid(req, res, seqError);
+    const me = req.user.id;
+    // Membership first, so outsiders get 404 rather than learning anything from a 400.
+    if (!(await pool.query(SQL.isMember, [id, me])).rowCount) return notFound(req, res);
+    const { rows } = await pool.query(SQL.markRead, [id, me, seq]);
+    // No row: the member exists, so the seq was beyond the newest stored message.
+    if (!rows[0]) return invalid(req, res, seqError);
+    try {
+      // My other tabs clear their badge. The cursor is stored, so a push failure is only logged.
+      await onRead(me, id, rows[0].last_read_seq);
+    } catch {
+      console.error({ requestId: req.id, code: "read_push_failed" });
+    }
+    res.json({ lastReadSeq: rows[0].last_read_seq });
   });
 
   return router;

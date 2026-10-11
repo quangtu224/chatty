@@ -34,11 +34,19 @@ export const SQL = {
   // Conversations visible to a user ($1), optionally only one of them ($2, or null for all).
   // Columns: conversation_id, type, name, owner_id, member_count; for direct chats the peer
   // as id/handle/display_name/avatar_id (so toUser(row) works directly; all null for groups);
-  // the latest message with a "last_" prefix (all null when there is none).
+  // the latest message with a "last_" prefix (all null when there is none);
+  // last_read_seq (my read cursor) and unread_count (others' messages after it).
   listConversations: `
     SELECT c.id AS conversation_id, c.type, c.name, c.owner_id,
            (SELECT count(*)::int FROM chatty.conversation_members cm
             WHERE cm.conversation_id = c.id) AS member_count,
+           me.last_read_seq,
+           -- Messages after my cursor that someone else sent. My own messages never count
+           -- as unread. Reads a seq range of the (conversation_id, seq) index.
+           (SELECT count(*)::int FROM chatty.messages um
+            WHERE um.conversation_id = c.id
+              AND um.seq > me.last_read_seq
+              AND um.sender_id <> me.user_id) AS unread_count,
            peer.id, peer.handle, peer.display_name, peer.avatar_id,
            last.id                AS last_id,
            last.conversation_id   AS last_conversation_id,
@@ -129,6 +137,20 @@ export const SQL = {
     VALUES ($1, $2, $3, $4, $5, $6, $7)
     RETURNING *`,
   bumpSeq: `UPDATE chatty.conversations SET next_seq = next_seq + 1 WHERE id = $1`,
+
+  // Moves my read cursor ($1 conversation, $2 me, $3 seq) forward, never back:
+  // GREATEST keeps the larger value, so a late or out-of-order request cannot "unread"
+  // messages, and two tabs updating at once both end at the higher value (one atomic UPDATE).
+  // "$3 < next_seq" rejects cursors beyond the newest stored message (no row comes back).
+  // Returns the cursor after the update. Run SQL.isMember first to tell 404 from 400.
+  markRead: `
+    UPDATE chatty.conversation_members cm
+    SET last_read_seq = GREATEST(cm.last_read_seq, $3::int)
+    FROM chatty.conversations c
+    WHERE c.id = cm.conversation_id
+      AND cm.conversation_id = $1 AND cm.user_id = $2
+      AND $3::int < c.next_seq
+    RETURNING cm.last_read_seq`,
 };
 
 // DB row -> API message. `prefix` reads prefixed columns, e.g. toMessage(row, "last_")
@@ -156,6 +178,8 @@ export function toMessage(row, prefix = "") {
 //   direct: { id, type: "direct", peer, lastMessage }  (peer columns are the other user)
 //   group:  { id, type: "group", name, ownerId, memberCount, lastMessage }
 //           (peer columns are null for groups, so no peer is exposed)
+// TODO(M3b): add lastReadSeq: row.last_read_seq and unreadCount: row.unread_count to
+// BOTH shapes (direct and group).
 export async function listConversations(db, userId, conversationId = null) {
   const { rows } = await db.query(SQL.listConversations, [
     userId,
@@ -350,6 +374,15 @@ export function conversationRoutes({
       }
     }
     res.status(result.created ? 201 : 200).json({ message });
+  });
+
+  // TODO(M3b): PUT /conversations/:id/read { seq }  ->  200 { lastReadSeq }
+  //   non-UUID id -> 404; seq must be a whole number >= 0 (typeof number,
+  //   Number.isInteger) else 400 fieldErrors.seq; SQL.isMember (no row -> 404);
+  //   SQL.markRead with [id, me, seq]: no row -> 400 fieldErrors.seq (beyond the newest
+  //   message); otherwise respond with the returned last_read_seq (may be higher than seq).
+  router.put("/conversations/:id/read", async (req, res) => {
+    throw new Error("TODO: PUT /conversations/:id/read");
   });
 
   return router;

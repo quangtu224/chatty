@@ -34,6 +34,12 @@ if (import.meta.main) {
     pool, appOrigin: APP_ORIGIN, secureCookies: NODE_ENV === "production",
     onMessage: (message) => realtime.publishMessage(message),
     onSessionRevoked: (token) => realtime.revokeSession(token),
+    // Revoke first: a removed member's tabs drop the chat before others see the new list.
+    onGroupChanged: async (id, revoked = []) => {
+      await realtime.revokeAccess(id, revoked);
+      await realtime.publishConversation(id);
+    },
+    onRead: (userId, id, seq) => realtime.publishRead(userId, id, seq),
   });
   const server = createServer(app);
   // Attach Socket.IO before listening so writes and pushes share the same runtime.

@@ -19,6 +19,12 @@ const RECIPIENTS_SQL = `
   JOIN chatty.sessions s ON s.user_id = cm.user_id
   WHERE cm.conversation_id = $1 AND s.expires_at > now()`;
 
+// Live sessions of specific users ($1 uuid[]), whether or not they are still members:
+// a removed member's tabs, or my own other tabs for read sync (uses sessions_user_id_idx).
+const USER_SESSIONS_SQL = `
+  SELECT token_hash FROM chatty.sessions
+  WHERE user_id = ANY($1::uuid[]) AND expires_at > now()`;
+
 export function createRealtime(server, { pool, appOrigin }) {
   const io = new Server(server, {
     // Browser WebSocket handshakes carry Origin; require it to prevent cross-site sockets.
@@ -56,6 +62,27 @@ export function createRealtime(server, { pool, appOrigin }) {
       const rooms = rows.map((row) => sessionRoom(row.token_hash));
       if (rooms.length) io.to(rooms).emit("message:created", message);
     },
+    // M3c event contract (payloads carry ids only; clients refetch GET /conversations/:id,
+    // which already returns the per-user shape: name, members, unreadCount, ...):
+    //   conversation:updated        { conversationId }               current members
+    //   conversation:access-revoked { conversationId }               users who lost access
+    //   read:updated                { conversationId, lastReadSeq }  the reader's own sessions
+    // Rooms are per session (see sessionRoom); turn token_hash rows into room names like
+    // publishMessage does and skip the emit when there are no rooms.
+
+    // TODO(owner): emit "conversation:updated" to every live session of the current
+    // members of conversationId (RECIPIENTS_SQL). A closed group has no members: no-op.
+    async publishConversation(conversationId) {},
+
+    // TODO(owner): emit "conversation:access-revoked" to every live session of userIds
+    // (USER_SESSIONS_SQL). They are no longer members, so RECIPIENTS_SQL cannot find them.
+    // Ignore an empty userIds array.
+    async revokeAccess(conversationId, userIds) {},
+
+    // TODO(owner): emit "read:updated" { conversationId, lastReadSeq } to every live session
+    // of userId (USER_SESSIONS_SQL with [userId]) so the other tabs clear their badge.
+    async publishRead(userId, conversationId, lastReadSeq) {},
+
     revokeSession(token) {
       // A logout/rotation closes this session's tabs, preserving independent logins.
       if (typeof token === "string" && token)

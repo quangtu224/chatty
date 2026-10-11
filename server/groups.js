@@ -122,7 +122,10 @@ function otherUserIds(value, me) {
   return [...new Set(value.map((id) => id.toLowerCase()))].filter((id) => id !== me);
 }
 
-export function groupRoutes({ pool, auth }) {
+// Realtime (M3c): every successful change calls onGroupChanged(conversationId,
+// revokedUserIds) AFTER the transaction commits; revokedUserIds lists users who just lost
+// access (removed member, the leaver). A push failure must never fail the response.
+export function groupRoutes({ pool, auth, onGroupChanged = async () => {} }) {
   const router = express.Router();
   router.use("/conversations", auth);
 
@@ -182,6 +185,7 @@ export function groupRoutes({ pool, auth }) {
       await db.query(GROUP_SQL.addMembers, [id, [me, ...others]]);
       return (await listConversations(db, me, id))[0];
     });
+    // TODO(owner): onGroupChanged(conversation.id): every new member sees the group appear.
     res.status(201).json({ conversation });
   });
 
@@ -217,6 +221,7 @@ export function groupRoutes({ pool, auth }) {
       await db.query(GROUP_SQL.addMembers, [id, userIds]);
       return { value: await conversationDetails(db, me, id) };
     });
+    // TODO(owner): onGroupChanged(req.params.id): newcomers and existing members refresh.
     if (conversation) res.json({ conversation });
   });
 
@@ -237,6 +242,7 @@ export function groupRoutes({ pool, auth }) {
         return { error: [404, "not_found", "That person isn’t in this group."] };
       return { value: true };
     });
+    // TODO(owner): onGroupChanged(req.params.id, [target]): the removed user loses the chat.
     if (done) res.status(204).end();
   });
 
@@ -259,6 +265,7 @@ export function groupRoutes({ pool, auth }) {
         };
       return { value: await conversationDetails(db, me, id) };
     });
+    // TODO(owner): onGroupChanged(req.params.id): everyone sees the new owner.
     if (conversation) res.json({ conversation });
   });
 
@@ -272,6 +279,7 @@ export function groupRoutes({ pool, auth }) {
       if (group.member_count === 1) await db.query(GROUP_SQL.closeGroup, [id]);
       return { value: true };
     });
+    // TODO(owner): onGroupChanged(req.params.id, [req.user.id]): my other tabs drop the chat.
     if (done) res.status(204).end();
   });
 

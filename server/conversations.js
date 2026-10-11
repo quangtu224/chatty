@@ -227,6 +227,7 @@ export function conversationRoutes({
   auth,
   sendLimit,
   onMessage = async () => {},
+  onRead = async () => {},
 }) {
   const router = express.Router();
   // Every conversation route needs a signed-in user (sets req.user).
@@ -399,6 +400,9 @@ export function conversationRoutes({
     const { rows } = await pool.query(SQL.markRead, [id, me, seq]);
     // No row: the member exists, so the seq was beyond the newest stored message.
     if (!rows[0]) return invalid(req, res, seqError);
+    // TODO(owner): after the update, call onRead(me, id, rows[0].last_read_seq) so my other
+    // tabs clear their badge. Like onMessage: a push failure must not fail the response
+    // (try/catch + console.error({ requestId: req.id, code: "read_push_failed" })).
     res.json({ lastReadSeq: rows[0].last_read_seq });
   });
 

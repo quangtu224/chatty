@@ -14,6 +14,7 @@ import {
 import { initialConversations, people, olderMessages } from "./data.js";
 import { readStorage, saveStorage, updateStatus } from "./model.js";
 import { getMe, logout, updateMe } from "./services/api.js";
+import useLiveChat from './useLiveChat.js';
 export default function App() {
   const [chats, setChats] = useState(() =>
     readStorage("chatty.chats.v1", initialConversations).map((c) => ({
@@ -49,8 +50,10 @@ export default function App() {
     [toast, setToast] = useState("");
   const timers = useRef(new Set());
   const live = mode === "live";
-  // Live conversations arrive in M2; fixtures never appear as live data.
-  const shownChats = live ? [] : chats;
+  const liveChat = useLiveChat(live ? user : null, active, notify, () => {
+    setUser(null); setMode('auth'); setModal(null); setActive(null);
+  });
+  const shownChats = live ? liveChat.chats : chats;
   const shownProfile = live
     ? { name: user.displayName, avatar: user.avatarId }
     : profile;
@@ -81,6 +84,7 @@ export default function App() {
     getMe().then(
       ({ user }) => {
         setUser(user);
+        setActive(null);
         setMode("live");
       },
       () => setMode("auth"),
@@ -126,7 +130,9 @@ export default function App() {
     setTheme((t) => (t === "light" ? "dark" : "light"));
   }
   function send() {
+    if (live) return liveChat.send();
     const text = (drafts[active] || "").trim();
+    if (/^\/gif(?:\s|$)/.test(text)) return notify('GIFs need the live server', '!');
     if (!text || !chat) return;
     const id = crypto.randomUUID(),
       chatId = active;
@@ -160,6 +166,7 @@ export default function App() {
     );
   }
   function retry(id) {
+    if (live) return liveChat.retry(id);
     const chatId = active;
     setChats((cs) => updateStatus(cs, chatId, id, "sending"));
     later(
@@ -175,7 +182,12 @@ export default function App() {
       700,
     );
   }
-  function direct(p) {
+  async function direct(p) {
+    if (live) {
+      const id = await liveChat.direct(p);
+      if (id) { select(id); setModal(null); }
+      return;
+    }
     let existing = chats.find(
       (c) => c.type === "direct" && c.members.includes(p.id),
     );
@@ -217,6 +229,7 @@ export default function App() {
     notify("Your little workspace is ready.");
   }
   function loadOlder() {
+    if (live) return liveChat.older();
     const chatId = active;
     setLoadingOlder(true);
     later(() => {
@@ -287,7 +300,7 @@ export default function App() {
         onSelect={select}
         search={search}
         setSearch={setSearch}
-        onNew={live ? undefined : () => setModal("new")}
+        onNew={() => setModal("new")}
         profile={shownProfile}
         theme={theme}
         onTheme={themeToggle}
@@ -300,13 +313,15 @@ export default function App() {
               return notify("We couldn’t sign you out. Try again.", "!");
             }
             setUser(null);
+            liveChat.clearDrafts();
           }
           setModal(null);
           setMode("auth");
         }}
         onDemo={live ? undefined : () => setModal("demo")}
       />
-      {loading ? (
+      {live && liveChat.error && <div role="alert" className="network-banner">{liveChat.error} <button onClick={liveChat.reload}>Retry loading conversations</button></div>}
+      {(live ? liveChat.loading : loading) ? (
         <main className="chat-main loading-screen">
           <Brand />
           <div className="loading-bars">
@@ -318,25 +333,29 @@ export default function App() {
         </main>
       ) : (
         <Chat
+          key={chat?.id || 'empty'}
+          onGifSend={live ? liveChat.send : undefined}
+          onReloadHistory={live ? liveChat.reloadHistory : undefined}
           visible={mobileChat}
           chat={chat}
           profile={shownProfile}
-          draft={drafts[active] || ""}
-          onDraft={(value) => setDrafts((d) => ({ ...d, [active]: value }))}
+          draft={live ? liveChat.draft : drafts[active] || ""}
+          onDraft={live ? liveChat.setDraft : (value) => setDrafts((d) => ({ ...d, [active]: value }))}
           onSend={send}
           onRetry={retry}
           onBack={() => setMobileChat(false)}
           onDetails={() => setModal("details")}
           onOlder={loadOlder}
-          loadingOlder={loadingOlder}
-          network={network}
+          loadingOlder={live ? liveChat.loadingOlder : loadingOlder}
+          network={live ? liveChat.network : network}
           typing={
-            typing && network === "online" && !!chat?.members.includes("alice")
+            !live && typing && network === "online" && !!chat?.members.includes("alice")
           }
         />
       )}
       {modal === "new" && (
         <ConversationDialog
+          live={live}
           onClose={() => setModal(null)}
           onDirect={direct}
           onGroup={group}
@@ -362,7 +381,7 @@ export default function App() {
       {modal === "details" && chat && !confirmation && (
         <DetailsDialog
           chat={chat}
-          profile={profile}
+          profile={shownProfile}
           onClose={() => setModal(null)}
           onMembers={() => setModal("members")}
           onRemove={remove}

@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { Avatar, IconButton, EmptyState, SafeText } from "./UI.jsx";
 import { people } from "../data.js";
+import GifPicker from './GifPicker.jsx';
+import { gifUrl } from '../services/chat-model.js';
 export default function Chat({
   chat,
   profile,
@@ -26,6 +28,8 @@ export default function Chat({
   network,
   typing,
   visible,
+  onGifSend,
+  onReloadHistory,
 }) {
   const history = useRef(null),
     bottom = useRef(null),
@@ -33,6 +37,7 @@ export default function Chat({
     textarea = useRef(null),
     skipScroll = useRef(false);
   const [away, setAway] = useState(false);
+  const [gifQuery,setGifQuery]=useState(null);
   useLayoutEffect(() => {
     preserve.current = null;
     skipScroll.current = false;
@@ -70,6 +75,11 @@ export default function Chat({
   ).length;
   const submit = () => {
     if (draft.trim()) {
+      if (chat.live && /^\/gif(?:\s|$)/.test(draft.trim())) {
+        setGifQuery(draft.trim().slice(4).trim());
+        return;
+      }
+      setAway(false);
       onSend();
       textarea.current?.focus();
     }
@@ -91,8 +101,8 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            <i className={online ? "status-online" : "status-offline"} />
-            {chat.type === "group"
+            {!chat.live && <i className={online ? "status-online" : "status-offline"} />}
+            {chat.live ? `@${chat.peer.handle}` : chat.type === "group"
               ? `${chat.members.length} members · ${online} online`
               : online
                 ? "Online · Here to chat"
@@ -137,7 +147,8 @@ export default function Chat({
         aria-label="Message history"
       >
         <div className="older-area">
-          {!chat.olderLoaded ? (
+          {chat.historyError ? <div role="alert">{chat.historyError} <button className="text-button" onClick={onReloadHistory}>Retry loading messages</button></div>
+          : chat.historyLoading ? <span role="status">Loading messages…</span> : !chat.olderLoaded ? (
             <button
               className="text-button"
               disabled={loadingOlder}
@@ -174,19 +185,20 @@ export default function Chat({
             const person =
               m.author === "me"
                 ? profile
-                : people.find((p) => p.id === m.author) || people[1];
+                : chat.live ? chat.peer : people.find((p) => p.id === m.author) || people[1];
             const outgoing = m.author === "me";
             const grouped =
               i > 0 &&
               chat.messages[i - 1].author === m.author &&
               !m.unreadStart &&
-              chat.messages[i - 1].older === m.older;
+              chat.messages[i - 1].older === m.older &&
+              (!chat.live || chat.messages[i - 1].date === m.date);
             return (
               <div key={m.id}>
-                {((i === 0 && !m.older) ||
-                  (m.older !== chat.messages[i - 1]?.older && !m.older)) && (
+                {(chat.live ? i === 0 || m.date !== chat.messages[i - 1]?.date : ((i === 0 && !m.older) ||
+                  (m.older !== chat.messages[i - 1]?.older && !m.older))) && (
                   <div className="date-divider">
-                    <span>Today, October 8</span>
+                    <span>{chat.live ? m.date : 'Today, October 8'}</span>
                   </div>
                 )}
                 {m.unreadStart && (
@@ -206,13 +218,16 @@ export default function Chat({
                     {!grouped && (
                       <div className="message-meta">
                         {!outgoing && <strong>{person.name}</strong>}
-                        <time>{m.time}</time>
+                        <time dateTime={m.createdAt}>{m.time}</time>
                       </div>
                     )}
                     <div
                       className={`message-bubble ${m.code ? "code-bubble" : ""}`}
                     >
-                      {m.code ? (
+                      {m.kind === 'gif' && gifUrl(m.gifId) ? (
+                        <><img className="message-gif" src={gifUrl(m.gifId)} alt={m.text} loading="lazy" referrerPolicy="no-referrer" />
+                        <a className="giphy-attribution" href="https://giphy.com" target="_blank" rel="noreferrer">Powered by GIPHY</a></>
+                      ) : m.code ? (
                         <code>{m.text}</code>
                       ) : (
                         <SafeText text={m.text} />
@@ -261,6 +276,8 @@ export default function Chat({
         </button>
       )}
       <footer className="composer-area">
+        {gifQuery !== null && <GifPicker query={gifQuery} onCancel={()=>{setGifQuery(null);textarea.current?.focus();}}
+          onSelect={gif=>{setAway(false);onGifSend(gif);setGifQuery(null);textarea.current?.focus();}} />}
         <div className="typing" aria-live="polite">
           {typing && (
             <>
@@ -277,8 +294,10 @@ export default function Chat({
             placeholder={`Message ${chat.name}…`}
             rows={2}
             value={draft}
+            readOnly={gifQuery !== null}
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={(e) => {
+              if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifQuery(null);return;}
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&
@@ -292,7 +311,7 @@ export default function Chat({
           <button
             className="send-button"
             aria-label="Send message"
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || gifQuery !== null}
             onClick={submit}
           >
             <Send size={21} />

@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Date: 2026-10-09. Status: M1 identity/database implemented and verified on 2026-10-09; M2 not started.
+Updated: 2026-10-11. Status: M1 and M2 implemented and locally verified against PostgreSQL 17 and two browser accounts. GIF provider tests use controlled responses; a live GIPHY key/provider check remains a release prerequisite.
 
 ## 1. Outcome and constraints
 
@@ -14,16 +14,16 @@ The earlier MongoDB direction is replaced in this proposal by Supabase-hosted Po
 
 | Area | Current | Required work |
 | --- | --- | --- |
-| Auth | Email/password/handle UI, signup 10–128, local session flag | Users, password hashing, sessions, CSRF and logout |
-| Messages | Local UUID, optimistic UI, timer-based completion/retry | Persistence, acknowledgements, deduplication, catch-up |
+| Auth | Live email/password/handle accounts and server cookie sessions | Deployment verification |
+| Messages | Durable direct-chat REST sends and authorized Socket.IO push; mock UI remains separate | Live-chat UI and catch-up |
 | Groups | Local creation/membership and owner buttons | Real permissions, explicit ownership transfer |
 | History | Older-message fixtures and scroll preservation | Server pagination/timestamps |
 | Unread | Fixture counts cleared on selection | Read cursor with visibility/scroll rules |
 | Presence/typing | Static people/demo toggles | Authenticated sockets and expiry |
 | Storage | Global `chatty.*.v1` localStorage | Isolate demo and real accounts |
-| Tests | Eleven local model tests passing; PostgreSQL tests not verified | Passing integration and live browser tests |
+| Tests | Local model/API/auth/direct-chat/realtime suites | Docker recheck, live-chat browser verification |
 
-Source inspection is not browser verification. Current owner-leave copy claims transfer but the local handler only removes the group. Sign-out retains local chat data. Initial state opens the demo workspace. These are known integration gaps.
+Source inspection is not browser verification. Group ownership is still mock-only. Initial load checks the server session; Try demo explicitly opens fixtures. Historical demo storage is retained separately; live logout ends the server session.
 
 ## 3. Product rules
 
@@ -67,7 +67,7 @@ Online requires at least one authenticated socket, including multiple tabs. Disc
 
 Keep fixtures and Demo controls behind an explicit mock mode. Try demo must not create a real session or write to the database. Initial live mode checks server session and opens auth when absent, never trusts the old local session flag. Keep mock/live data separate; mock controls do not appear in live chat.
 
-In M1 live mode the conversation list is empty and Demo controls are hidden; real conversations arrive in M2. Fixtures never appear as live data.
+Live mode displays authorized real conversations and hides Demo controls. Fixtures never appear as live data. Live presence, typing and unread state arrive in M3.
 
 Excluded: video/voice, uploads, WASM, AI, push, message-content search, read receipts, message edit/delete, OAuth, verified email, recovery and end-to-end encryption.
 
@@ -108,13 +108,13 @@ Reuse `UI.jsx`, `model.js` and component boundaries. Replace direct fixture look
 | --- | --- |
 | `users` | UUID PK, normalized email unique, handle unique, display_name, password_hash, avatar_id, created_at |
 | `sessions` | token_hash PK, user_id FK, expires_at; index expiry/user |
-| `conversations` | UUID PK, type, direct_key, name, owner_id, description, next_seq, closed_at |
+| `conversations` | UUID PK, direct_key, next_seq (int), created_at; M3 adds type, name, owner_id, description, closed_at |
 | `conversation_members` | PK (conversation_id,user_id), joined_at, last_read_seq; index (user_id,conversation_id) |
-| `messages` | UUID PK, conversation_id, sender_id, client_message_id, seq, kind (`text`/`gif`), body, gif_id (required only for `gif`), created_at |
+| `messages` | UUID PK, conversation_id, sender_id, client_message_id (UUID), seq (int), kind (`text`/`gif`), body, gif_id (required only for `gif`), created_at |
 
 Unique direct_key for direct conversations is the sorted pair of user IDs. Unique message keys: `(conversation_id,sender_id,client_message_id)` and `(conversation_id,seq)`. The latter supports history/catch-up. Foreign keys preserve integrity; no account deletion in this release. Use check constraints for pinned lengths/types where practical.
 
-Message transaction: lock conversation, authorize current membership, return canonical existing message on duplicate key, allocate per-conversation sequence, insert, commit, then ack/broadcast. Sequence increment rolls back with insertion and is serialized within a conversation. Duplicate sends cannot overwrite the original body. Membership changes use the same lock.
+Message transaction: lock conversation, authorize current membership, return canonical existing message on duplicate key, allocate per-conversation sequence, insert, commit, then respond and broadcast. `seq` is a PostgreSQL integer (about 2 billion per conversation), so JSON numbers stay exact. Sequence increment rolls back with insertion and is serialized within a conversation. Duplicate sends cannot overwrite the original body. Membership changes use the same lock.
 
 Use parameterized queries, bounded pool, rollback/release on errors and verified TLS for hosted connections. Use Supabase session pooler if direct IPv6 is unreachable. Separate migration-owner credentials from a least-privilege runtime role.
 
@@ -139,11 +139,14 @@ REST prefix `/api/v1`; errors `{ error: { code, message, fieldErrors? }, request
 | `GET /conversations/:id/messages?beforeSeq=&limit=` | Older history |
 | `GET /conversations/:id/messages?afterSeq=&limit=` | Catch-up |
 | `PUT /conversations/:id/read` | Advance cursor |
+| `POST /conversations/:id/messages` | Send `{ clientMessageId, body }`: 201 new, 200 canonical duplicate |
 | `GET /gifs?query=` | Authenticated, rate-limited Giphy search proxy |
 
 Message cursors are exclusive; reject both in one request. Uncursored queries return latest page in ascending display order; responses expose pagination state. Canonical message contains UUID, clientMessageId, senderId, sequence, body and UTC createdAt. Encode PostgreSQL bigint cursors as decimal strings in JSON if bigint is used; never silently coerce unsafe integers.
 
-Client events: `message:send`, `typing:set`, `conversation:subscribe`. Send accepts conversationId/clientMessageId/body, with an ack containing canonical message or structured error. Subscription authorizes room access. Server events: `message:created`, `conversation:updated`, `conversation:access-revoked`, `read:updated`, `typing:updated`, `presence:updated`. User rooms update sidebar/multiple tabs without exposing unrelated chats. Sender identity comes from the session.
+Messages are sent over REST (decision 2026-10-09): `POST /conversations/:id/messages` reuses session auth, CSRF and rate limiting, and its response is the acknowledgement. Socket.IO only pushes server events. Client events: `typing:set`, `conversation:subscribe`; subscription authorizes room access. Server events: `message:created`, `conversation:updated`, `conversation:access-revoked`, `read:updated`, `typing:updated`, `presence:updated`. User rooms update sidebar/multiple tabs without exposing unrelated chats. Sender identity comes from the session.
+
+M2b currently implements only `message:created`, with WebSocket transport and session-scoped rooms chosen by the server. It joins no client-selected rooms and exposes no write event. A fresh database query selects current member sessions for every push. Session expiry disconnects idle sockets; logout/rotation revokes the matching session's tabs. Remaining events belong to later slices. Duplicate sends do not rebroadcast; a push failure does not undo an already committed message.
 
 ## 7. Recovery and ordering
 
@@ -190,7 +193,7 @@ Retain Node's model test runner. Add real PostgreSQL integration tests and Playw
 ## 10. Milestones
 
 - [x] **M1: Identity/database.** Server, migrations/config, real email auth/public handles, CSRF/session/profile; integrate App/Auth/model. Gate: auth security/migration tests.
-- [ ] **M2: Durable direct chat.** Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate: two-user, concurrent retry and GIF proxy/validation tests.
+- [x] **M2: Durable direct chat.** Slices: M2a migration 002 + REST (direct pair, list, history, send); M2b Socket.IO push; M2c frontend live chat; M2d `/gif`. Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate passed locally on 2026-10-11: PostgreSQL integration tests (including concurrent retry and GIF proxy/validation), two browser accounts, history paging and GIF keyboard/cancel/outage flows. Provider responses/images were controlled in browser tests; live GIPHY access must be checked before release.
 - [ ] **M3: Groups/read state.** Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
 - [ ] **M4: Recovery/polish.** Catch-up/gaps, fetch races, mock isolation, logout cleanup, responsive/accessibility. Gate: multi-page offline tests.
 - [ ] **M5: Delivery/portfolio.** Docker, lint/CI/CD, hosted connection/migrations, health/rollback, README and demo recording. Gate: exact-SHA deployment/recovery evidence.

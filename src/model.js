@@ -63,3 +63,12 @@ export function validateProfile(fields) {
     errors.avatar = "Choose an avatar.";
   return errors;
 }
+// TODO(M2a): null when valid; otherwise a UI message. Rules: a string of 1–4000
+// Unicode code points ([...body].length, not .length) with a non-whitespace character.
+export function messageBodyError(body) {
+  if (typeof body !== "string" || !/[^\s]/.test(body))
+    return "Enter a message.";
+  const length = [...body].length;
+  if (length > 4000) return "Message is too long.";
+  return null;
+}

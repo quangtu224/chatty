@@ -1,9 +1,13 @@
 import { createApp } from "./app.js";
 import { createPool } from "./db.js";
+import { createServer } from "node:http";
+import { createRealtime } from "./realtime.js";
 
-export async function stopServer(server, pool) {
+export async function stopServer(server, pool, realtime) {
   try {
-    await new Promise((resolve, reject) => {
+    // Realtime owns the shared HTTP server when present; never close it twice.
+    if (realtime) await realtime.close();
+    else await new Promise((resolve, reject) => {
       server.close((err) => err ? reject(err) : resolve());
     });
   } finally {
@@ -25,15 +29,23 @@ if (import.meta.main) {
     throw new Error("PORT must be a number between 1 and 65535.");
 
   const pool = createPool(DATABASE_URL);
-  const app = createApp({ pool, appOrigin: APP_ORIGIN, secureCookies: NODE_ENV === "production" });
-  const server = app.listen(Number(port), () => {
+  let realtime;
+  const app = createApp({
+    pool, appOrigin: APP_ORIGIN, secureCookies: NODE_ENV === "production",
+    onMessage: (message) => realtime.publishMessage(message),
+    onSessionRevoked: (token) => realtime.revokeSession(token),
+  });
+  const server = createServer(app);
+  // Attach Socket.IO before listening so writes and pushes share the same runtime.
+  realtime = createRealtime(server, { pool, appOrigin: APP_ORIGIN });
+  server.listen(Number(port), () => {
     console.log(`Server listening on port ${server.address().port}`);
   });
   let closing = false;
   const shutdown = async () => {
     if (closing) return;
     closing = true;
-    try { await stopServer(server, pool); } catch {
+    try { await stopServer(server, pool, realtime); } catch {
       console.error("Server shutdown failed.");
       process.exitCode = 1;
     }

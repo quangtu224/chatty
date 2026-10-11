@@ -12,23 +12,16 @@ import {
   rateLimit,
   requireUser,
   sendError,
+  toUser,
   verifyPassword,
 } from "./auth.js";
+import { conversationRoutes } from "./conversations.js";
+import { gifSearch } from './gifs.js';
 import { withTransaction } from "./db.js";
 import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
-
-function toUser(row, withEmail = false) {
-  const user = {
-    id: row.id,
-    handle: row.handle,
-    displayName: row.display_name,
-    avatarId: row.avatar_id,
-  };
-  return withEmail ? { ...user, email: row.email } : user;
-}
 
 const renameKeys = (errors, names) =>
   Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
@@ -60,7 +53,13 @@ export function createApp({
   pool,
   appOrigin,
   authRateLimit = { windowMs: 15 * 60_000, max: 10 },
+  sendRateLimit = { windowMs: 10_000, max: 30 },
   secureCookies = false,
+  onMessage = async () => {},
+  onSessionRevoked = () => {},
+  giphyApiKey = process.env.GIPHY_API_KEY,
+  gifFetch = fetch,
+  gifRateLimit = {windowMs:60_000,max:20},
 }) {
   const app = express();
   app.use((req, res, next) => {
@@ -125,6 +124,8 @@ export function createApp({
         await startSession(req, res, db, rows[0].id);
         return rows[0];
       });
+      // Revoke the previous socket session only after registration commits.
+      onSessionRevoked(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
       res.status(201).json({ user: toUser(user, true) });
     } catch (err) {
       if (err.code !== "23505") throw err;
@@ -151,11 +152,14 @@ export function createApp({
     if (!rows[0] || !valid)
       return sendError(req, res, 401, "invalid_credentials", "Email or password is incorrect.");
     await startSession(req, res, pool, rows[0].id);
+    onSessionRevoked(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
     res.json({ user: toUser(rows[0], true) });
   });
 
   v1.post("/auth/logout", async (req, res) => {
-    await deleteSession(pool, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+    const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    await deleteSession(pool, token);
+    onSessionRevoked(token);
     res.clearCookie(SESSION_COOKIE, cookieOptions);
     res.status(204).end();
   });
@@ -196,6 +200,10 @@ export function createApp({
       nextCursor: rows.length > limit ? page.at(-1).handle : null,
     });
   });
+
+  v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage }));
+  // Separate quota: a provider outage cannot block ordinary text chat.
+  v1.get('/gifs',auth,rateLimit(gifRateLimit),gifSearch({apiKey:giphyApiKey,fetchGifs:gifFetch}));
 
   app.use("/api/v1", v1);
   app.use("/api", (req, res) => {

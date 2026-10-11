@@ -47,7 +47,7 @@ export default function Sidebar({
         )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
-        {["group", "direct"].map((type) => (
+        {(onDemo ? ["group", "direct"] : ["direct"]).map((type) => (
           <section key={type}>
             <div className="section-label">
               {type === "group" ? "Group chats" : "Direct messages"}
@@ -64,7 +64,7 @@ export default function Sidebar({
                   <Avatar
                     name={c.avatar}
                     online={
-                      type === "direct"
+                      !c.live && type === "direct"
                         ? people.find(
                             (p) => c.members.includes(p.id) && p.id !== "me",
                           )?.online
@@ -82,7 +82,7 @@ export default function Sidebar({
                     </div>
                     <div className="preview-line">
                       <span>
-                        {c.messages.at(-1)?.text || "Start the conversation"}
+                        {c.preview || c.messages.at(-1)?.text || "Start the conversation"}
                       </span>
                       {c.unread > 0 && (
                         <b
@@ -118,7 +118,7 @@ export default function Sidebar({
             <span>
               <strong>{profile.name}</strong>
               <small>
-                <i /> Available
+                {onDemo ? <><i /> Available</> : 'Signed in'}
               </small>
             </span>
           </button>

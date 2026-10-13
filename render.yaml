@@ -15,7 +15,7 @@ services:
       # APP_ORIGIN is not set: the server uses Render's RENDER_EXTERNAL_URL. Set it only
       # for a custom domain (https://host, no trailing slash).
       # chatty_app via Session pooler with sslmode=verify-full and
-      # sslrootcert=/etc/secrets/supabase-ca.crt (secret file added in the dashboard).
+      # sslrootcert=/app/certs/supabase-ca.crt (public CA shipped in the image).
       - key: DATABASE_URL
         sync: false
       # One Render proxy in front: per-IP rate limits see the real client.

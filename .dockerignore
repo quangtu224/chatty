@@ -13,6 +13,8 @@
 !server/**
 !scripts/
 !scripts/healthcheck.mjs
+!certs/
+!certs/**
 !scripts/build.mjs
 **/*.test.js
 **/*.spec.js

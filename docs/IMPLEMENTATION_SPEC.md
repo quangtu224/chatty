@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-11. Status: M1–M4 locally verified; M5 Docker/local release and CI workflow implemented with local evidence. Hosted GitHub CI execution, Supabase/Render and cloud CD remain deferred/unverified. GIF provider tests use controlled responses; live GIPHY access remains a hosted-release prerequisite.
+Updated: 2026-10-11. Status: M1–M4 locally verified; M5 Docker/local release and CI workflow implemented with local evidence. GitHub CI passed on GitHub; Supabase schema/roles are provisioned; Render deploys `main` only after CI passes (`render.yaml`) and is not yet live. GIF provider tests use controlled responses; live GIPHY access remains a hosted-release prerequisite.
 
 ## 1. Outcome and constraints
 

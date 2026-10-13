@@ -1,0 +1,26 @@
+# Render Blueprint: the only hosted deployment. It deploys main, and only after GitHub
+# CI (lint-migrate-build-smoke) passes for that commit. Milestone branches never deploy.
+# Secrets are entered once in the Render dashboard (sync: false), never stored here.
+services:
+  - type: web
+    name: chatty
+    runtime: docker
+    region: frankfurt          # EU, nearest Render region to Supabase eu-west-1
+    plan: free
+    branch: main
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/ready   # also checks the database connection
+    envVars:
+      # https://<service>.onrender.com, no trailing slash (CSRF/socket Origin checks).
+      - key: APP_ORIGIN
+        sync: false
+      # chatty_app via Session pooler with sslmode=verify-full and
+      # sslrootcert=/etc/secrets/supabase-ca.crt (secret file added in the dashboard).
+      - key: DATABASE_URL
+        sync: false
+      # One Render proxy in front: per-IP rate limits see the real client.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: GIPHY_API_KEY
+        sync: false

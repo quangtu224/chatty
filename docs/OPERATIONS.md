@@ -71,11 +71,26 @@ Prepared and tested locally; not yet exercised against a real host.
 - `TRUST_PROXY=1` behind one hosting proxy, so per-IP rate limits see real clients. Leave it unset without a proxy: a spoofed `X-Forwarded-For` would bypass the limits.
 - Every response sends a Content-Security-Policy (same-origin scripts/sockets, GIPHY images, Google Fonts), `nosniff`, `no-referrer` and `frame-ancestors 'none'`. A new external image, font or script host needs a CSP update in `server/app.js`.
 
-## GitHub CI and future cloud release
+## Render + Supabase (hosted release)
+
+Only `main` is deployed. `render.yaml` (Render Blueprint) pins the service to `main` with `autoDeployTrigger: checksPass`, so Render deploys a `main` commit only after its GitHub CI check passes. Milestone branches run CI but never deploy. Merge milestone PRs into `main` in order and require `lint-migrate-build-smoke` in branch protection.
+
+Render builds the `Dockerfile` from GitHub and sets `RENDER_GIT_COMMIT`, which health reports as the SHA.
+
+1. Supabase: download the CA from Database Settings → SSL Configuration. Use the **Session pooler** connection (IPv4, port 5432): the migration advisory lock needs a session, and the direct host is IPv6-only by default. URL-encode passwords.
+2. Before merging code that needs a new migration, run it once from a trusted machine as the owner (`postgres.<project-ref>`): `NODE_ENV=production`, `MIGRATION_DATABASE_URL=...?sslmode=verify-full&sslrootcert=<local CA path>`, `npm run db:migrate`. Migrations must stay additive so the running app keeps working.
+3. Runtime role, once: create `chatty_app` with a strong password, then run `docker/runtime-role.sql` (it skips creation, applies grants and fails on any ungranted table). The app connects as `chatty_app.<project-ref>`.
+4. Render, once: **New → Blueprint** from `main`. Enter `APP_ORIGIN=https://<service>.onrender.com`, `DATABASE_URL=...?sslmode=verify-full&sslrootcert=/etc/secrets/supabase-ca.crt` and optional `GIPHY_API_KEY`; then add the secret file `supabase-ca.crt` under the service's Environment settings. Do not set `NODE_ENV` or `PORT`.
+5. After each deploy: `npm run smoke -- https://<service>.onrender.com <full main SHA>`.
+6. Rollback: in Render, redeploy the last good deploy (its SHA from the previous smoke); never roll back the schema.
+
+Free limits: the service sleeps after 15 minutes idle (about a minute to wake), runs one instance and may restart at any time; a free Supabase project pauses after inactivity. Pre-deploy commands are not used, so step 2 stays manual.
+
+## GitHub CI
 
 `.github/workflows/ci.yml` runs on main/milestone branch pushes, pull requests and manual dispatch. It uses read-only permissions and pinned Actions, installs the lockfile, lints, applies/re-runs migrations on an isolated PostgreSQL 17 database, builds frontend/image and runs SHA-aware container smoke as a restricted database user. Failed steps fail the job. The check is `lint-migrate-build-smoke`; require it for `main` in repository branch protection before merging. Private suites are intentionally absent from public CI; run `npm run verify` locally before every push.
 
-No push, branch-protection change, hosted CI run or hosted deployment is implied by these files. Cloud CD later must consume a successful main SHA, serialize deployments, apply migrations once, verify HTTPS/Secure cookies and the deployed SHA, and retain a known-good rollback artifact. Supabase also needs a non-exposed `chatty` schema. These hosted gates are not yet verified.
+Status 2026-10-13: CI passed on GitHub for `m5-delivery`. The Supabase schema is migrated over verified TLS; `chatty` is not visible to Supabase's API roles, and `chatty_app` was checked to have DML-only access. Branch protection, the Render deployment and an HTTPS smoke run are not done yet.
 
 ## Portfolio evidence and recording
 

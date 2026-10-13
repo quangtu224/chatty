@@ -18,7 +18,11 @@ export async function stopServer(server, pool, realtime) {
 }
 
 if (import.meta.main) {
-  const { DATABASE_URL, APP_ORIGIN, NODE_ENV } = process.env;
+  const { DATABASE_URL, NODE_ENV, RENDER_EXTERNAL_URL } = process.env;
+  // On Render the public URL is known (RENDER_EXTERNAL_URL, e.g. https://x.onrender.com),
+  // so APP_ORIGIN is only needed elsewhere or for a custom domain. .origin drops any path.
+  const APP_ORIGIN = process.env.APP_ORIGIN ||
+    (RENDER_EXTERNAL_URL ? new URL(RENDER_EXTERNAL_URL).origin : undefined);
   if (!DATABASE_URL) throw new Error("DATABASE_URL is required.");
   let origin;
   try { origin = new URL(APP_ORIGIN); } catch {

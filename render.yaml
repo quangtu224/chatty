@@ -12,9 +12,8 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health/ready   # also checks the database connection
     envVars:
-      # https://<service>.onrender.com, no trailing slash (CSRF/socket Origin checks).
-      - key: APP_ORIGIN
-        sync: false
+      # APP_ORIGIN is not set: the server uses Render's RENDER_EXTERNAL_URL. Set it only
+      # for a custom domain (https://host, no trailing slash).
       # chatty_app via Session pooler with sslmode=verify-full and
       # sslrootcert=/etc/secrets/supabase-ca.crt (secret file added in the dashboard).
       - key: DATABASE_URL
@@ -22,5 +21,6 @@ services:
       # One Render proxy in front: per-IP rate limits see the real client.
       - key: TRUST_PROXY
         value: "1"
+      # Server-only key from developers.giphy.com; without it only /gif search is off.
       - key: GIPHY_API_KEY
         sync: false

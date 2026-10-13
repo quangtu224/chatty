@@ -1,4 +1,6 @@
 import express from "express";
+import { extname, join, relative, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   CSRF_COOKIE,
@@ -23,6 +25,30 @@ import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
+
+// Browser hardening for the same-origin frontend (also harmless on JSON responses).
+// CSP: scripts, sockets and API calls only from this origin; images also from GIPHY
+// (GIF messages) and data: URIs (Bootstrap's inline SVG icons); styles/fonts from
+// Google Fonts (styles.css @import). frame-ancestors 'none' blocks clickjacking.
+// React's style={...} props use the CSSOM, which CSP style-src does not restrict.
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "connect-src 'self'",
+    "img-src 'self' data: https://media.giphy.com",
+    "style-src 'self' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "X-Content-Type-Options": "nosniff",
+  // GIF images already use referrerPolicy="no-referrer"; no URL leaks to other sites.
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
 
 const renameKeys = (errors, names) =>
   Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
@@ -50,6 +76,7 @@ const USER_COLUMNS = "id, email, handle, display_name, avatar_id";
 //
 // Mutations go through csrfProtection; register/login through rateLimit(authRateLimit).
 // Cookies: HttpOnly, SameSite=Lax, Path=/, Secure when secureCookies is true.
+// Every response sends SECURITY_HEADERS; HSTS too when secureCookies (HTTPS) is on.
 export function createApp({
   pool,
   appOrigin,
@@ -66,11 +93,36 @@ export function createApp({
   giphyApiKey = process.env.GIPHY_API_KEY,
   gifFetch = fetch,
   gifRateLimit = {windowMs:60_000,max:20},
+  frontendDir,
+  releaseSha,
+  logger = () => {},
+  // Number of reverse proxies in front of the app (hosting platform load balancer).
+  // 0 = none: X-Forwarded-For is client-controlled, so trusting it would let anyone
+  // dodge the per-IP rate limits. With 1, req.ip is the address that proxy saw.
+  trustProxy = 0,
 }) {
   const app = express();
+  app.set("trust proxy", trustProxy);
+  app.use((req, res, next) => {
+    res.set(SECURITY_HEADERS);
+    // Browsers only honor HSTS over HTTPS; it pins this host to HTTPS for 180 days.
+    if (secureCookies) res.set("Strict-Transport-Security", "max-age=15552000");
+    next();
+  });
   app.use((req, res, next) => {
     req.id = randomUUID();
     res.set("X-Request-ID", req.id);
+    // One structured log line per finished request. The route *pattern* (e.g.
+    // "/conversations/:id/messages", relative to its router) is logged instead of the
+    // URL, so ids, query strings, headers, cookies and bodies never reach the logs.
+    const started = performance.now();
+    res.on("finish", () => logger({
+      requestId: req.id,
+      method: req.method,
+      route: req.route?.path ?? "unmatched",
+      status: res.statusCode,
+      durationMs: Math.round(performance.now() - started),
+    }));
     next();
   });
   app.use(express.json({ limit: "16kb" }));
@@ -95,14 +147,18 @@ export function createApp({
     });
   }
 
-  app.get("/health/live", (req, res) => res.json({ status: "ok" }));
+  // Health reports the running Git SHA so releases and rollbacks can prove which
+  // revision is live. no-store: a cached answer could show the wrong revision.
+  const health = { status: "ok", ...(releaseSha && { sha: releaseSha }) };
+  // live = the process answers; ready (below) = it can also reach the database.
+  app.get("/health/live", (req, res) => res.set("Cache-Control", "no-store").json(health));
   app.get("/health/ready", async (req, res) => {
     try {
       await pool.query("SELECT 1");
     } catch {
       return sendError(req, res, 503, "not_ready", "Database is unavailable.");
     }
-    res.json({ status: "ok" });
+    res.set("Cache-Control", "no-store").json(health);
   });
 
   const v1 = express.Router();
@@ -216,6 +272,30 @@ export function createApp({
   app.use("/api", (req, res) => {
     sendError(req, res, 404, "not_found", "API route not found.");
   });
+  // Production/Docker: serve the built frontend (dist/) from the same origin as the API
+  // and sockets, so cookies, CSRF and Origin checks need no cross-site setup. In
+  // development Vite serves the frontend instead and frontendDir is undefined.
+  if (frontendDir) {
+    app.use(express.static(frontendDir, {
+      index: false,
+      dotfiles: "ignore",
+      // Vite puts a content hash in every assets/ file name, so those can be cached
+      // forever; index.html must be revalidated to pick up a new release.
+      setHeaders: (res, path) => {
+        const hashed = relative(frontendDir, path).startsWith(`assets${sep}`) && !path.endsWith(".html");
+        res.set("Cache-Control", hashed ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    }));
+    // Single-page app fallback: browser navigations get index.html. Anything that looks
+    // like a file, a dotfile, health or socket.io falls through to the normal 404.
+    app.get("/{*path}", (req, res, next) => {
+      const notPage = !req.accepts("html") || extname(req.path) ||
+        req.path.split("/").some((part) => part.startsWith(".")) ||
+        req.path.startsWith("/health") || req.path.startsWith("/socket.io");
+      if (notPage) return next();
+      res.set("Cache-Control", "no-cache").sendFile(join(frontendDir, "index.html"));
+    });
+  }
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     if (err.type === "entity.parse.failed")

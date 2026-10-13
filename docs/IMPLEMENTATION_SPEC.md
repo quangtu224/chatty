@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-11. Status: M1 and M2 implemented and locally verified against PostgreSQL 17 and two browser accounts. GIF provider tests use controlled responses; a live GIPHY key/provider check remains a release prerequisite.
+Updated: 2026-10-11. Status: M1–M4 locally verified; M5 Docker/local release and CI workflow implemented with local evidence. Hosted GitHub CI execution, Supabase/Render and cloud CD remain deferred/unverified. GIF provider tests use controlled responses; live GIPHY access remains a hosted-release prerequisite.
 
 ## 1. Outcome and constraints
 
@@ -8,22 +8,22 @@ Build a working small-team chat application on the existing React interface. Dem
 
 Target: 4–6 weeks; weekly availability is unconfirmed. Use English copy and documentation; preserve the name **Chatty**, JavaScript, Bootstrap, current components/styles and runtime avatars. Keep one backend instance; test with 20 concurrent sockets without claiming production capacity.
 
-The earlier MongoDB direction is replaced in this proposal by Supabase-hosted PostgreSQL. Confirm the architecture when reviewing this spec before implementing it. Do not rebuild the frontend or add a second component system.
+The earlier MongoDB direction is replaced by PostgreSQL, currently local and later Supabase-hosted. Preserve the existing frontend and component system. M5 currently targets Docker/local and GitHub CI only; hosted connection/CD gates remain deferred by the owner.
 
 ## 2. Inspected baseline
 
 | Area | Current | Required work |
 | --- | --- | --- |
 | Auth | Live email/password/handle accounts and server cookie sessions | Deployment verification |
-| Messages | Durable direct-chat REST sends and authorized Socket.IO push; mock UI remains separate | Live-chat UI and catch-up |
-| Groups | Local creation/membership and owner buttons | Real permissions, explicit ownership transfer |
-| History | Older-message fixtures and scroll preservation | Server pagination/timestamps |
-| Unread | Fixture counts cleared on selection | Read cursor with visibility/scroll rules |
-| Presence/typing | Static people/demo toggles | Authenticated sockets and expiry |
-| Storage | Global `chatty.*.v1` localStorage | Isolate demo and real accounts |
-| Tests | Local model/API/auth/direct-chat/realtime suites | Docker recheck, live-chat browser verification |
+| Messages | Durable direct/group REST sends, authorized Socket.IO push and recovery | Hosted verification |
+| Groups | Owner permissions, explicit transfer, add/remove/leave and live dialogs | Hosted race/recovery check |
+| History | Server timestamps, older paging and contiguous catch-up | Hosted verification |
+| Unread | Persistent read cursors with visibility/scroll rules | Real browser tab/mobile keyboard check |
+| Presence/typing | Authenticated sockets and ephemeral expiry | One process; no multi-instance support |
+| Storage | Isolated demo localStorage and account-scoped tab drafts | Pending sends remain memory-only |
+| Tests | Private model/API/PostgreSQL/multi-user browser suites | Public CI build/migration diagnostics |
 
-Source inspection is not browser verification. Group ownership is still mock-only. Initial load checks the server session; Try demo explicitly opens fixtures. Historical demo storage is retained separately; live logout ends the server session.
+Source inspection is not browser verification. Initial load checks the server session; Try demo explicitly opens fixtures. Historical demo storage is retained separately; live logout ends the server session.
 
 ## 3. Product rules
 
@@ -146,7 +146,7 @@ Message cursors are exclusive; reject both in one request. Uncursored queries re
 
 Messages are sent over REST (decision 2026-10-09): `POST /conversations/:id/messages` reuses session auth, CSRF and rate limiting, and its response is the acknowledgement. Socket.IO only pushes server events. Client events: `typing:set`, `conversation:subscribe`; subscription authorizes room access. Server events: `message:created`, `conversation:updated`, `conversation:access-revoked`, `read:updated`, `typing:updated`, `presence:updated`. User rooms update sidebar/multiple tabs without exposing unrelated chats. Sender identity comes from the session. M3c payloads carry ids only and are sent after COMMIT: `conversation:updated { conversationId }` to current members (create, add, transfer, remove, leave; clients refetch `GET /conversations/:id`), `conversation:access-revoked { conversationId }` to the sessions of users who just lost access (removed member, leaver), `read:updated { conversationId, lastReadSeq }` to the reader's own sessions. A push failure never fails the committed REST response. M3d: `presence:updated { userIds, online }` goes to the sessions of contacts (people sharing a conversation) when a user's first socket opens or last closes; each new socket first gets a snapshot of its online contacts. `typing:set { conversationId, typing }` is checked for membership and throttled (same state at most once per second per socket); `typing:updated { conversationId, userId, typing }` goes to the other members, and clients expire it after five seconds. Presence and typing live in one process's memory.
 
-M2b currently implements only `message:created`, with WebSocket transport and session-scoped rooms chosen by the server. It joins no client-selected rooms and exposes no write event. A fresh database query selects current member sessions for every push. Session expiry disconnects idle sockets; logout/rotation revokes the matching session's tabs. Remaining events belong to later slices. Duplicate sends do not rebroadcast; a push failure does not undo an already committed message.
+Current delivery uses WebSocket transport and session-scoped rooms chosen by the server. Message, conversation, revocation, read, presence and typing events are implemented. It joins no client-selected rooms; conversation subscription is unnecessary with this session-room design. Message writes remain REST-only; typing is the authorized client socket event. A fresh database query selects eligible member sessions for pushes. Session expiry disconnects idle sockets; logout/rotation revokes matching tabs. Duplicate sends do not rebroadcast; push failures do not undo committed writes.
 
 ## 7. Recovery and ordering
 
@@ -162,7 +162,7 @@ Argon2id for passwords via `node:crypto` (requires Node.js 24.7 or newer; no has
 
 CSRF tokens and approved Origin for mutations; socket origin/session validation. Rate-limit auth/search/send; cap payload. No credentials or message bodies in logs. `VITE_*` values are public, never secrets.
 
-Compose will run PostgreSQL and app with health checks/persistent volume. Isolate test database. Production image multi-stage/non-root. Add sanitized `.env.example` when config exists: DATABASE_URL, MIGRATION_DATABASE_URL, TEST_DATABASE_URL, APP_ORIGIN, PORT, NODE_ENV, GIPHY_API_KEY. Local development and tests use PostgreSQL in Docker Compose (`chatty` and `chatty_test` databases); Supabase is connected at M5. Do not advertise executable server commands before their scripts exist.
+Compose runs PostgreSQL and app with health checks/persistent volume; migration and runtime-role jobs gate startup. The production image is multi-stage/non-root with a pinned Node base and explicit source allowlist. `.env.example` documents local configuration. Local tests accept only loopback `chatty_test`. Hosted Supabase/TLS and cloud CD remain deferred; do not mark those gates complete from local evidence.
 
 Test source is kept out of the public repository by owner decision; model/integration/E2E suites run locally before every push and their results are recorded. CI: clean lockfile install, lint, migrations on isolated PostgreSQL, frontend/container builds. Keep migrations/lockfiles in Git. CD runs only a successful main SHA, pins that revision and serializes deployment. Disable auto-deploy bypassing CI. Run migrations once with lock; failures block deployment. Additive schema changes remain compatible with previous app revision.
 
@@ -196,7 +196,7 @@ Retain Node's model test runner. Add real PostgreSQL integration tests and Playw
 - [x] **M2: Durable direct chat.** Slices: M2a migration 002 + REST (direct pair, list, history, send); M2b Socket.IO push; M2c frontend live chat; M2d `/gif`. Pair uniqueness, authorized send, sockets/adapters, history/server timestamps, `/gif` messages. Gate passed locally on 2026-10-11: PostgreSQL integration tests (including concurrent retry and GIF proxy/validation), two browser accounts, history paging and GIF keyboard/cancel/outage flows. Provider responses/images were controlled in browser tests; live GIPHY access must be checked before release.
 - [x] **M3: Groups/read state.** Slices: M3a migration 003 + group REST (create, details, add/remove, transfer, leave/close); M3b read cursor/unread; M3c group UI + realtime revocation; M3d typing/presence. Transfer/membership, unread, typing/presence; integrate Dialogs/Sidebar/Chat. Gate: permission/race/hidden-tab tests.
 - [x] **M4: Recovery/polish.** Catch-up/gaps, fetch races, mock isolation, logout cleanup, responsive/accessibility. Gate: multi-page offline tests.
-- [ ] **M5: Delivery/portfolio.** Docker, lint/CI/CD, hosted connection/migrations, health/rollback, README and demo recording. Gate: exact-SHA deployment/recovery evidence.
+- [ ] **M5: Delivery/portfolio (full hosted scope deferred).** Docker/local and GitHub CI first by owner decision. Local implementation: pinned non-root image, restricted runtime role, gated migrations, lint/private verification, public CI lint/migration/build/smoke workflow, SHA health, release/rollback/backup runbook and README. Local evidence: 70 server + 37 frontend/API tests, production build, two-account browser flow in Docker, exact-SHA release, failed-check/migration startup gates, restore into a new database, and 20 sockets/10 messages (200 receive timings, local p95 25 ms). GitHub workflow validates with actionlint; no hosted run or cloud deployment is claimed. Remaining full M5 gates: publish/execute CI, branch protection, hosted TLS/connection/CD, exact-SHA hosted recovery and demo recording.
 
 Estimate: M1 week 1, M2 week 2, M3 week 3, M4 week 4, M5/fixes weeks 5–6. Reduce animation/demo polish or defer typing/presence if needed, not permissions/durability/recovery.
 

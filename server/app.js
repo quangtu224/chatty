@@ -26,6 +26,30 @@ import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
 
+// Browser hardening for the same-origin frontend (also harmless on JSON responses).
+// CSP: scripts, sockets and API calls only from this origin; images also from GIPHY
+// (GIF messages) and data: URIs (Bootstrap's inline SVG icons); styles/fonts from
+// Google Fonts (styles.css @import). frame-ancestors 'none' blocks clickjacking.
+// React's style={...} props use the CSSOM, which CSP style-src does not restrict.
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "connect-src 'self'",
+    "img-src 'self' data: https://media.giphy.com",
+    "style-src 'self' https://fonts.googleapis.com",
+    "font-src https://fonts.gstatic.com",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "X-Content-Type-Options": "nosniff",
+  // GIF images already use referrerPolicy="no-referrer"; no URL leaks to other sites.
+  "Referrer-Policy": "no-referrer",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
 const renameKeys = (errors, names) =>
   Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
 const USER_COLUMNS = "id, email, handle, display_name, avatar_id";
@@ -52,6 +76,7 @@ const USER_COLUMNS = "id, email, handle, display_name, avatar_id";
 //
 // Mutations go through csrfProtection; register/login through rateLimit(authRateLimit).
 // Cookies: HttpOnly, SameSite=Lax, Path=/, Secure when secureCookies is true.
+// Every response sends SECURITY_HEADERS; HSTS too when secureCookies (HTTPS) is on.
 export function createApp({
   pool,
   appOrigin,
@@ -71,8 +96,19 @@ export function createApp({
   frontendDir,
   releaseSha,
   logger = () => {},
+  // Number of reverse proxies in front of the app (hosting platform load balancer).
+  // 0 = none: X-Forwarded-For is client-controlled, so trusting it would let anyone
+  // dodge the per-IP rate limits. With 1, req.ip is the address that proxy saw.
+  trustProxy = 0,
 }) {
   const app = express();
+  app.set("trust proxy", trustProxy);
+  app.use((req, res, next) => {
+    res.set(SECURITY_HEADERS);
+    // Browsers only honor HSTS over HTTPS; it pins this host to HTTPS for 180 days.
+    if (secureCookies) res.set("Strict-Transport-Security", "max-age=15552000");
+    next();
+  });
   app.use((req, res, next) => {
     req.id = randomUUID();
     res.set("X-Request-ID", req.id);

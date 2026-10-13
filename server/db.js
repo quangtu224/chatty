@@ -1,7 +1,13 @@
 import pg from "pg";
 
-// Hosted connections need verified TLS (M5).
+// Hosted connections need verified TLS: in production (app and migrations) the URL
+// must say sslmode=verify-full, so pg checks the server certificate and host name.
+// Supabase's CA is not a public root; add sslrootcert=<path to its CA file> or set
+// NODE_EXTRA_CA_CERTS (see docs/OPERATIONS.md). Local HTTP/Compose runs development.
 export function createPool(connectionString) {
+  if (process.env.NODE_ENV === "production" &&
+      new URL(connectionString).searchParams.get("sslmode") !== "verify-full")
+    throw new Error("Production database URLs need sslmode=verify-full.");
   return new pg.Pool({
     connectionString,
     max: 10,

@@ -43,12 +43,18 @@ if (import.meta.main) {
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
     throw new Error("PORT must be a number between 1 and 65535.");
 
+  // TRUST_PROXY: hops of reverse proxies in front (1 on most hosts, unset locally).
+  const trustProxy = Number(process.env.TRUST_PROXY ?? 0);
+  if (!Number.isInteger(trustProxy) || trustProxy < 0 || trustProxy > 5)
+    throw new Error("TRUST_PROXY must be a whole number of proxies (0-5).");
+
   const pool = createPool(DATABASE_URL);
   let realtime;
   const app = createApp({
     pool, appOrigin: APP_ORIGIN, secureCookies: NODE_ENV === "production",
     frontendDir: hasFrontend ? frontendDir : undefined,
     releaseSha,
+    trustProxy,
     // JSON lines on stdout: Docker/hosting collects them (docker compose logs app).
     logger: (record) => console.log(JSON.stringify(record)),
     onMessage: (message) => realtime.publishMessage(message),

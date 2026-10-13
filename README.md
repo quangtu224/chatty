@@ -53,7 +53,7 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Production requires an HTTPS origin and built frontend; local HTTP Compose uses development cookies. The runtime database user has DML-only privileges, separate from the migration owner. Hosted verified TLS connections are deferred with Supabase hosting.
+Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Production requires an HTTPS origin and built frontend; local HTTP Compose uses development cookies. The runtime database user has DML-only privileges, separate from the migration owner. Production also requires `sslmode=verify-full` database URLs and sends security headers; set `TRUST_PROXY` behind a hosting proxy (see the operations runbook). These settings are tested locally, not yet on a host.
 
 ### Docker/local and CI
 

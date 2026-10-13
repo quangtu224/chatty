@@ -62,11 +62,20 @@ docker compose exec -T db psql -U chatty -d chatty_restore_check -c 'SELECT coun
 
 Restore creates owner/schema objects; provision runtime grants separately before running an app against a restored database. Verify users, message counts, sequence ordering and authentication on the restored copy. Document when the backup was taken and data that would be lost since then. Do not commit dump files or personal chat data.
 
+## Hosted settings
+
+Prepared and tested locally; not yet exercised against a real host.
+
+- `NODE_ENV=production` (image default): HTTPS `APP_ORIGIN`, Secure cookies and HSTS.
+- `DATABASE_URL` and `MIGRATION_DATABASE_URL` must use `sslmode=verify-full`, or the process refuses to start. Supabase signs with its own CA: download it from the project's database settings and add `&sslrootcert=<path>` or set `NODE_EXTRA_CA_CERTS=<path>`. Use separate migration (owner) and runtime (DML-only) credentials.
+- `TRUST_PROXY=1` behind one hosting proxy, so per-IP rate limits see real clients. Leave it unset without a proxy: a spoofed `X-Forwarded-For` would bypass the limits.
+- Every response sends a Content-Security-Policy (same-origin scripts/sockets, GIPHY images, Google Fonts), `nosniff`, `no-referrer` and `frame-ancestors 'none'`. A new external image, font or script host needs a CSP update in `server/app.js`.
+
 ## GitHub CI and future cloud release
 
 `.github/workflows/ci.yml` runs on main/milestone branch pushes, pull requests and manual dispatch. It uses read-only permissions and pinned Actions, installs the lockfile, lints, applies/re-runs migrations on an isolated PostgreSQL 17 database, builds frontend/image and runs SHA-aware container smoke as a restricted database user. Failed steps fail the job. The check is `lint-migrate-build-smoke`; require it for `main` in repository branch protection before merging. Private suites are intentionally absent from public CI; run `npm run verify` locally before every push.
 
-No push, branch-protection change, hosted CI run or hosted deployment is implied by these files. Cloud CD later must consume a successful main SHA, serialize deployments, apply migrations once, verify HTTPS/Secure cookies and the deployed SHA, and retain a known-good rollback artifact. Supabase needs verified TLS, separate migration/runtime credentials and a non-exposed `chatty` schema. These hosted gates are not yet implemented or verified.
+No push, branch-protection change, hosted CI run or hosted deployment is implied by these files. Cloud CD later must consume a successful main SHA, serialize deployments, apply migrations once, verify HTTPS/Secure cookies and the deployed SHA, and retain a known-good rollback artifact. Supabase also needs a non-exposed `chatty` schema. These hosted gates are not yet verified.
 
 ## Portfolio evidence and recording
 

@@ -20,6 +20,8 @@ services:
     pull_policy: never
     command: ["node", "server/migrate.js"]
     environment:
+      # The image defaults to production, which requires verified TLS; local DB has none.
+      NODE_ENV: development
       MIGRATION_DATABASE_URL: postgres://chatty:chatty@db:5432/chatty
     depends_on:
       db:

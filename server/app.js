@@ -155,7 +155,10 @@ export function createApp({
   app.get("/health/ready", async (req, res) => {
     try {
       await pool.query("SELECT 1");
-    } catch {
+    } catch (err) {
+      // Log only the error code (ENOENT/EACCES = CA file, 28P01 = password, ENOTFOUND =
+      // host, SELF_SIGNED_CERT_IN_CHAIN = wrong CA); messages never include the URL.
+      logger({ requestId: req.id, code: "db_unavailable", reason: err.code ?? err.name });
       return sendError(req, res, 503, "not_ready", "Database is unavailable.");
     }
     res.set("Cache-Control", "no-store").json(health);

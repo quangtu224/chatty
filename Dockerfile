@@ -25,6 +25,8 @@ COPY package.json package-lock.json ./
 COPY server ./server
 COPY src/model.js ./src/model.js
 COPY scripts/healthcheck.mjs ./scripts/healthcheck.mjs
+# Public Supabase root CA (no secret): DATABASE_URL can use sslrootcert=/app/certs/supabase-ca.crt.
+COPY certs ./certs
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE 3000

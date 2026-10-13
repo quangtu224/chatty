@@ -13,7 +13,7 @@ Chatty is a full-stack portfolio project in progress. Real accounts and durable 
 - Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
 - Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.
 
-M1–M4 are implemented. M5 currently targets Docker/local and GitHub CI; Supabase hosting, cloud CD and a hosted demo are deferred. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
+M1–M4 are implemented. M5 adds Docker/local releases and GitHub CI; hosting is Render (deploys `main` only, after CI passes, via `render.yaml`) with Supabase PostgreSQL. The hosted release is not live yet. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
 
 ## Frontend demo features
 
@@ -142,6 +142,7 @@ chatty/
   Dockerfile                 Pinned multi-stage non-root runtime
   scripts/                   Build, release and health diagnostics
   .github/workflows/ci.yml    Lint/migration/build/container smoke gates
+  render.yaml                Render Blueprint: deploys main after CI passes
   docs/OPERATIONS.md         Release, rollback, backup and portfolio recording
   .env.example               Local configuration examples
   index.html
@@ -154,8 +155,8 @@ Fixtures are necessary source for the public demo. Test source, dependencies, bu
 
 ## Roadmap
 
-1. Publish the branch and obtain a real GitHub CI run; configure required checks on main.
-2. Connect Supabase with verified TLS/separate roles, then add gated cloud CD, HTTPS smoke and hosted rollback evidence.
+1. Merge the milestone branches into `main` and require the CI check on `main`.
+2. Create the Render Blueprint from `main`, then record HTTPS smoke and rollback evidence.
 3. Record a short demo with test accounts; verify live GIPHY access before claiming it in a hosted release.
 4. Consider pending-send persistence across reloads after the first hosted release.
 

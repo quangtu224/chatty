@@ -58,7 +58,7 @@ M2d adds `/gif <query>`: Enter opens up to eight G-rated results above the compo
 
 Set `GIPHY_API_KEY` in the server's `.env` to enable search; never use a `VITE_` key. `GET /api/v1/gifs?query=` requires a session, limits queries to 100 Unicode characters and has a separate rate limit (20/minute per IP). Missing keys, quota exhaustion and provider errors show a GIF-only error; text chat still works. Search uses `rating=g`, limits results to eight and displays attribution following the [GIPHY API documentation](https://developers.giphy.com/docs/api/). Browsers load images directly from `media.giphy.com`, so GIPHY sees each viewer's IP address. Only alphanumeric GIF IDs are stored and used to construct image URLs. Browser/provider tests use controlled search results; a production key and live provider verification are still needed before release.
 
-Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. Reconnect refreshes the conversation list; reopening a chat loads its latest history. Complete gap recovery during disconnection remains M4. M2 source and its local acceptance checks are complete; live-provider testing is listed above.
+Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. M4 recovers what was missed: after a reconnect, every loaded chat fetches all messages after its last gap-free position (`afterSeq` pages), a skipped sequence number triggers the same catch-up, and reopening a loaded chat continues from that position instead of jumping to the latest page. Chats are marked read only up to the gap-free position. Signing out clears drafts, search and the open chat before the next account signs in. M2 source and its local acceptance checks are complete; live-provider testing is listed above.
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
@@ -124,7 +124,7 @@ Fixtures are necessary source for the public demo. Test source, dependencies, bu
 
 1. Separate mock interactions from the server adapter without redesigning the UI.
 2. Add PostgreSQL migrations, authentication and conversation permissions.
-3. Complete reconnect gap recovery and pending-send persistence across reloads (durable direct messages, retry deduplication and `/gif` are implemented).
+3. Pending-send persistence across reloads (durable messages, retry deduplication, reconnect catch-up and `/gif` are implemented).
 4. Add integration/browser tests, Docker and gated deployment.
 
 See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirements and acceptance criteria.

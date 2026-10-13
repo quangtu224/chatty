@@ -76,3 +76,24 @@ export function typingText(people) {
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing`;
   return 'Several people are typing';
 }
+
+// M4 catch-up cursor: the highest seq reachable from the oldest loaded message without a
+// hole. Server seqs are contiguous per conversation, so a jump means unseen messages that
+// must be fetched (afterSeq) before anything is marked read past them. 0 when none loaded.
+export function contiguousSeq(messages) {
+  const seqs = (messages ?? []).map((m) => m.seq).filter(Boolean).sort((a, b) => a - b);
+  let last = seqs[0] ?? 0;
+  for (const seq of seqs) {
+    if (seq > last + 1) break;
+    last = Math.max(last, seq);
+  }
+  return last;
+}
+
+// Server snapshots (list refresh, details) can trail an optimistic local read. Never move
+// the read cursor back: keep the local cursor and its unread count when it is ahead.
+export function mergeReadState(old, incoming) {
+  return (old?.lastReadSeq ?? 0) > (incoming.lastReadSeq ?? 0)
+    ? { ...incoming, lastReadSeq: old.lastReadSeq, unreadCount: old.unreadCount }
+    : incoming;
+}

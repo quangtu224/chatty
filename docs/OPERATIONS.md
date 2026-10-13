@@ -71,7 +71,18 @@ Prepared and tested locally; not yet exercised against a real host.
 - `TRUST_PROXY=1` behind one hosting proxy, so per-IP rate limits see real clients. Leave it unset without a proxy: a spoofed `X-Forwarded-For` would bypass the limits.
 - Every response sends a Content-Security-Policy (same-origin scripts/sockets, GIPHY images, Google Fonts), `nosniff`, `no-referrer` and `frame-ancestors 'none'`. A new external image, font or script host needs a CSP update in `server/app.js`.
 
-## GitHub CI and future cloud release
+## Render + Supabase (planned first host)
+
+Not yet deployed or verified. Render builds the `Dockerfile` from GitHub and sets `RENDER_GIT_COMMIT`, which health reports as the SHA; Render passes the service's environment variables as Docker build args.
+
+1. Supabase: download the CA from Database Settings → SSL Configuration. Use the **Session pooler** connection (IPv4, port 5432): the migration advisory lock needs a session, and the direct host is IPv6-only by default. URL-encode passwords.
+2. Run migrations once per release from a trusted machine as the owner (`postgres.<project-ref>`), with `MIGRATION_DATABASE_URL=...?sslmode=verify-full&sslrootcert=<local CA path>` and `npm run db:migrate`.
+3. In the Supabase SQL editor, create `chatty_app` with a strong password (`CREATE ROLE chatty_app LOGIN PASSWORD '...'`), then run `docker/runtime-role.sql` (it skips creation and applies grants). The app connects as `chatty_app.<project-ref>`.
+4. Render web service (Docker, EU Frankfurt, health check `/health/ready`): secret file `supabase-ca.crt` (mounted at `/etc/secrets/supabase-ca.crt`) and environment `APP_ORIGIN=https://<service>.onrender.com`, `DATABASE_URL=...?sslmode=verify-full&sslrootcert=/etc/secrets/supabase-ca.crt`, `TRUST_PROXY=1`, optional `GIPHY_API_KEY`. Do not set `NODE_ENV` or `PORT`.
+5. After a deploy: `npm run smoke -- https://<service>.onrender.com <full-sha>`.
+
+Free limits: the service sleeps after 15 minutes idle (about a minute to wake), runs one instance and may restart at any time; a free Supabase project pauses after inactivity. Pre-deploy commands are not used, so migrations stay a manual, additive step before merging app code that needs them.
+
 
 `.github/workflows/ci.yml` runs on main/milestone branch pushes, pull requests and manual dispatch. It uses read-only permissions and pinned Actions, installs the lockfile, lints, applies/re-runs migrations on an isolated PostgreSQL 17 database, builds frontend/image and runs SHA-aware container smoke as a restricted database user. Failed steps fail the job. The check is `lint-migrate-build-smoke`; require it for `main` in repository branch protection before merging. Private suites are intentionally absent from public CI; run `npm run verify` locally before every push.
 

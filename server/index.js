@@ -30,7 +30,8 @@ if (import.meta.main) {
   if (NODE_ENV === "production" && origin.protocol !== "https:")
     throw new Error("Production APP_ORIGIN must use HTTPS. Use NODE_ENV=development for local HTTP.");
   // The Docker image bakes in its Git SHA; health reports it (see scripts/smoke.mjs).
-  const releaseSha = process.env.RELEASE_SHA ?? "development";
+  // Render builds from GitHub without our build arg but sets RENDER_GIT_COMMIT at runtime.
+  const releaseSha = process.env.RENDER_GIT_COMMIT || process.env.RELEASE_SHA || "development";
   if (releaseSha !== "development" && !/^[a-f0-9]{40}$/.test(releaseSha))
     throw new Error("RELEASE_SHA must be a full Git SHA.");
   // Serve the built frontend when dist/ exists (Docker); `npm run server` in

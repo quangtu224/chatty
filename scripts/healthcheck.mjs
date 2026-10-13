@@ -8,7 +8,9 @@ try {
     signal: AbortSignal.timeout(5000),
   });
   const health = await response.json();
-  if (!response.ok || health.status !== "ok" || health.sha !== process.env.RELEASE_SHA)
+  // Same SHA source as server/index.js (Render's RENDER_GIT_COMMIT wins when set).
+  const expected = process.env.RENDER_GIT_COMMIT || process.env.RELEASE_SHA;
+  if (!response.ok || health.status !== "ok" || health.sha !== expected)
     throw new Error("not ready");
 } catch {
   process.exitCode = 1;

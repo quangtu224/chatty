@@ -2,7 +2,7 @@
 
 A calm chat workspace for small teams, with a developer-friendly interface and original pixel-art avatars.
 
-Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. An explicit demo mode provides sample conversations separately.
+Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. All conversations require an authenticated server session; there is no demo mode.
 
 ## Live features
 
@@ -15,19 +15,6 @@ Chatty is a full-stack portfolio project in progress. Real accounts and durable 
 
 M1–M4 are implemented. M5 adds Docker/local releases and GitHub CI; hosting is Render (deploys `main` only, after CI passes, via `render.yaml`) with Supabase PostgreSQL. The hosted release is not live yet. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
 
-## Frontend demo features
-
-- Responsive direct and group conversation views.
-- Conversation and teammate search over sample data.
-- Local message composition, multiline input, sending/failed states and retry.
-- Earlier-message fixtures, scroll preservation and Jump to latest.
-- Local group creation and member management with confirmation dialogs.
-- Profile editing, pixel avatars and light/dark themes.
-- Demo controls for loading, typing, offline/reconnecting and message failure.
-- Browser persistence for demo conversations, drafts, profile and theme.
-
-In **Try demo**, conversations, unread counts, presence, typing, delivery, pagination and group permissions are simulated. Live sign-in uses server accounts and cookie sessions. The local demo is not a secure messaging service.
-
 ## Quick start
 
 Use Node.js 24.7 or newer and npm, matching `package.json`. Password hashing uses Node's built-in Argon2 API. Run from the directory containing this README:
@@ -37,7 +24,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The app asks the server for an existing session (`GET /api/v1/me`) and otherwise shows sign-in; **Try demo** opens the sample workspace without a server, database or API keys.
+Open the URL printed by Vite. The app asks the server for an existing session (`GET /api/v1/me`) and otherwise shows sign-in. The API and database must be running to chat.
 
 | Command | Purpose |
 | --- | --- |
@@ -89,19 +76,6 @@ Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
-## Exploring the demo
-
-1. Select a conversation or use **New conversation** to start a local chat.
-2. Send with Enter; use Shift+Enter for a newline. Input composition is supported.
-3. In **Demo controls**, enable **Fail the next message**, send, then retry.
-4. Load earlier messages and use **Jump to latest** after scrolling upward.
-5. Open **Group details** to compare owner and regular-member controls.
-6. Edit your profile or switch themes from the sidebar.
-
-Sign-in and sign-up call the Chatty server; without a running server they show a "couldn’t reach the server" message. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. Signed-in accounts see only their real conversations and no Demo controls. **Try demo** never creates a real account or session.
-
-Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Demo sign-out returns to sign-in but keeps demo conversations; live sign-out ends the server session. Avoid entering sensitive information.
-
 ## Stack
 
 | Layer | Current | Planned |
@@ -151,7 +125,7 @@ chatty/
   vite.config.js
 ```
 
-Fixtures are necessary source for the public demo. Test source, dependencies, build outputs, secrets, test artifacts and private design materials are excluded from Git, so `npm test` and `npm run test:server` only run in the author's local checkout.
+Test source, dependencies, build outputs, secrets, test artifacts and private design materials are excluded from Git, so `npm test` and `npm run test:server` only run in the author's local checkout.
 
 ## Roadmap
 

@@ -3,7 +3,7 @@ import { ArrowRight, LoaderCircle } from "lucide-react";
 import { Brand, Avatar } from "./UI.jsx";
 import { validateAuth } from "../model.js";
 import { login, register } from "../services/api.js";
-export default function Auth({ onLive, onDemo }) {
+export default function Auth({ onLive }) {
   const [signup, setSignup] = useState(false),
     [fields, setFields] = useState({ handle: "", password: "" }),
     [errors, setErrors] = useState({}),
@@ -29,7 +29,7 @@ export default function Auth({ onLive, onDemo }) {
           : {
               form: err.status < 500
                 ? err.message
-                : "We couldn’t reach the server. Try again, or enter the demo.",
+                : "We couldn’t reach the server. Try again.",
             },
       );
     }
@@ -119,16 +119,6 @@ export default function Auth({ onLive, onDemo }) {
               </>
             )}
           </button>
-          <div className="auth-or">
-            <span>or take a look around</span>
-          </div>
-          <button
-            type="button"
-            className="btn btn-outline-secondary"
-            onClick={onDemo}
-          >
-            Try demo <ArrowRight size={16} />
-          </button>
           <p className="auth-switch">
             {signup ? "Already have an account?" : "New around here?"}{" "}
             <button
@@ -144,8 +134,7 @@ export default function Auth({ onLive, onDemo }) {
           </p>
           <div className="auth-disclosure">
             Use a unique username (3–24 letters, numbers or underscores) and a
-            10–128 character password. No email required. Try
-            demo uses sample data in this browser and sends nothing.
+            10–128 character password. No email required.
           </div>
         </form>
       </section>

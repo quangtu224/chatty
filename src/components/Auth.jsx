@@ -73,13 +73,15 @@ export default function Auth({ onLive, onDemo }) {
               <input
                 className={`form-control ${errors.handle ? "is-invalid" : ""}`}
                 autoComplete="username"
+                aria-label="Username"
+                aria-describedby={errors.handle ? 'username-error' : undefined}
                 placeholder="e.g. alex_m"
                 maxLength={24}
                 value={fields.handle}
                 onChange={(e) => setFields({ ...fields, handle: e.target.value })}
                 aria-invalid={!!errors.handle}
               />
-              {errors.handle && <small className="field-error">{errors.handle}</small>}
+              {errors.handle && <small id="username-error" className="field-error">{errors.handle}</small>}
             </label>
           )}
           <label className="field">

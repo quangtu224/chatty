@@ -30,9 +30,12 @@ export default function App() {
   },anonymous.receive);
   const chat=liveChat.chats.find(c=>c.id===active);
   const temporary=chat?.type==='direct'&&anonymous.temporary;
-  const displayedChat=temporary?{...chat,...anonymous.chat,name:chat.name,avatar:chat.avatar,peer:chat.peer,historyError:'',historyLoading:false}:chat;
+  const displayedChat=temporary?{...chat,...anonymous.chat,name:chat.name,avatar:chat.avatar,peer:chat.peer,historyError:'',historyLoading:false,
+    readers:anonymous.chat.readers.map(r=>({...r,displayName:r.id===user.id?user.displayName:chat.peer.displayName,
+      avatarId:r.id===user.id?user.avatarId:chat.peer.avatarId}))}:chat;
   const profile=user ? {name:user.displayName,avatar:user.avatarId} : null;
   useEffect(()=>()=>clearTimeout(toastTimer.current),[]);
+  useEffect(()=>{liveChat.type(false);},[temporary]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;saveStorage('chatty.theme.v1',theme);},[theme]);
   useEffect(()=>{
     let cancelled=false;
@@ -70,11 +73,11 @@ export default function App() {
     {liveChat.error&&<div role="alert" className="network-banner">{liveChat.error}<button onClick={liveChat.reload}>Retry loading conversations</button></div>}
     {liveChat.loading?<main className="chat-main loading-screen"><Brand/><div className="loading-bars"><i/><i/><i/></div><p>Making room for your conversations…</p></main>
       :<Chat key={`${chat?.id||'empty'}:${temporary?'temporary':'normal'}`} chat={displayedChat} profile={profile}
-        draft={temporary?anonymous.draft:liveChat.draft} onDraft={temporary?anonymous.setDraft:liveChat.setDraft}
-        onSend={temporary?anonymous.send:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry} onGifSend={liveChat.send}
-        onReloadHistory={liveChat.reloadHistory} onReadLatest={temporary?undefined:liveChat.markRead}
+        draft={temporary?anonymous.draft:liveChat.draft} onDraft={temporary?value=>{anonymous.setDraft(value);liveChat.type(!!value.trim());}:liveChat.setDraft}
+        onSend={temporary?()=>{liveChat.type(false);anonymous.send();}:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry} onGifSend={liveChat.send}
+        onReloadHistory={liveChat.reloadHistory} onReadLatest={temporary?anonymous.markRead:liveChat.markRead}
         visible={mobileChat} onBack={()=>setMobileChat(false)} onDetails={temporary?undefined:()=>setModal('details')} onOlder={liveChat.older}
-        loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={temporary?[]:chat?.typingPeople}
+        loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={chat?.typingPeople} onTypingStop={()=>liveChat.type(false)}
         sendDisabled={chat?.type==='direct'&&(!anonymous.ready||liveChat.network!=='online')}
         controls={chat?.type==='direct'&&<AnonymousControls state={anonymous.state} userId={user.id} peerName={chat.peer.name} onAction={anonymous.action} onRefresh={anonymous.refresh} online={liveChat.network==='online'}/>}/>
     }

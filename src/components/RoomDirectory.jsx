@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {getGroups} from '../services/api.js';
 import {Avatar} from './UI.jsx';
+import {typingText} from '../services/chat-model.js';
 
 // Catalog rows expose no message previews; Join fetches authorized chat details.
 export default function RoomDirectory({search,version,onJoin,active,chats}){
@@ -20,11 +21,12 @@ export default function RoomDirectory({search,version,onJoin,active,chats}){
   }
   return <section aria-label="All public rooms">
     <div className="section-label">All rooms <button className="text-button" onClick={()=>setRetry(n=>n+1)}>Refresh</button></div>
-    {rooms.map(room=>{const unread=room.isMember?(chats.find(c=>c.id===room.id)?.unread??0):0;return <button key={room.id} className={`conversation-row ${active===room.id?'selected':''}`} disabled={busy!==null||(!room.isMember&&room.memberCount>=20)}
+    {rooms.map(room=>{const chat=room.isMember?chats.find(c=>c.id===room.id):null,unread=chat?.unread??0;return <button key={room.id} className={`conversation-row ${active===room.id?'selected':''}`} disabled={busy!==null||(!room.isMember&&room.memberCount>=20)}
       onClick={async()=>{setBusy(room.id);setError('');try{await onJoin(room.id);setRetry(n=>n+1);}catch(err){setError(err.message);}finally{setBusy(null);}}}>
       <Avatar name="forest" size={42}/><div className="conversation-copy"><div className="conversation-title"><strong># {room.name}</strong></div>
       <div className="preview-line"><span>{room.memberCount}/20 members · {busy===room.id?'Joining…':room.isMember?'Open':room.memberCount>=20?'Full':'Join'}</span>
-      {unread>0&&<b className="unread-badge" aria-label={`${unread} unread messages`}>{unread}</b>}</div></div>
+      {unread>0&&<b className="unread-badge" aria-label={`${unread} unread messages`}>{unread}</b>}</div>
+      {chat?.typingPeople?.length>0&&<span className="room-typing">{typingText(chat.typingPeople)}…</span>}</div>
     </button>;})}
     {loading&&<p role="status" className="dialog-description">Loading rooms…</p>}
     {!loading&&!rooms.length&&!error&&<p className="dialog-description">No rooms yet. Create one to get started.</p>}

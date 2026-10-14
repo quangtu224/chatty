@@ -1567,6 +1567,14 @@ kbd {
 .temporary-privacy { flex-basis:100%; color:var(--muted); font-size:11px; line-height:1.6; }
 .temporary-privacy summary { cursor:pointer; width:fit-content; }
 .temporary-privacy p { margin:8px 0 0; max-width:740px; }
+.message-status .receipt-button { color:var(--muted); text-decoration:underline; text-underline-offset:3px; }
+.message-status .receipt-button.is-seen { color:var(--accent-dark); }
+.reader-list { max-height:320px; overflow-y:auto; }
+.reader-row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid var(--border); }
+.reader-row strong { flex:1; min-width:0; overflow-wrap:anywhere; font-size:13px; }
+.reader-row > span { display:flex; align-items:center; gap:4px; font-size:12px; color:var(--muted); }
+.reader-row > .reader-seen { color:var(--accent-dark); }
+.room-typing { display:block; color:var(--accent-dark); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 @media(max-width:700px) { .anonymous-controls { padding:12px 16px; gap:8px; } .temporary-actions .btn { min-height:44px; } }
 .gif-picker-header, .gif-picker p, .gif-picker > .giphy-attribution { flex-shrink: 0; }
 @media (max-width: 600px) { .gif-results { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gif-picker { max-height: 250px; } }

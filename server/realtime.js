@@ -163,9 +163,9 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
     //   conversation:updated        { conversationId }               current members
     //   conversation:access-revoked { conversationId }               users who lost access
     //   read:updated                { conversationId, lastReadSeq }  the reader's own sessions
+    //   receipt:updated             { conversationId, userId, lastReadSeq } current other members
     // M3d (sent from the connection handler above):
-    //   presence:updated { userIds, online }  contacts (people sharing a chat); on connect
-    //                                         the socket gets a snapshot of online contacts
+    //   presence:updated { userIds, online, snapshot? } contacts; snapshots replace the online set
     //   typing:updated   { conversationId, userId, typing }  the other members
 
     // Current members' sessions. A closed group has no members, so nothing is sent.
@@ -183,9 +183,10 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
       if (!userIds?.length) return;
       await emitTo(USER_SESSIONS_SQL, [userIds], "conversation:access-revoked", { conversationId });
     },
-    // My own sessions only (other tabs clear their badge); peers learn nothing about it.
+    // Own tabs sync unread badges; current peers also receive a member-only read receipt.
     async publishRead(userId, conversationId, lastReadSeq) {
       await emitTo(USER_SESSIONS_SQL, [[userId]], "read:updated", { conversationId, lastReadSeq });
+      await emitTo(TYPING_RECIPIENTS_SQL,[conversationId,userId],'receipt:updated',{conversationId,userId,lastReadSeq});
     },
 
     revokeSession(token) {

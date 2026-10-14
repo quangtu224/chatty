@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { getAnonymousState, setAnonymousMode, sendAnonymousMessage } from './services/api.js';
-import { mergeMessages, viewConversation } from './services/chat-model.js';
+import { getAnonymousState, setAnonymousMode, sendAnonymousMessage, readAnonymousMessages } from './services/api.js';
+import { mergeMessages, viewConversation, contiguousSeq } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Temporary bodies and drafts live only in this tab's RAM, separate from live history.
@@ -8,17 +8,20 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
   const [rooms, setRooms] = useState({});
   const current = useRef({}), scope = useRef(null), selection = useRef(active);
   const callbacks = useRef({notify,onExpired});
+  const reading=useRef(new Map());
   callbacks.current = {notify,onExpired}; selection.current = active;
   function write(id, room) {
     current.current = {...current.current, [id]:room};
     setRooms(current.current);
   }
-  function clear() { current.current = {}; setRooms({}); }
+  function clear() { current.current = {}; setRooms({});reading.current.clear(); }
   function apply(state) {
     const old = current.current[state.conversationId];
     if (old && state.version < old.state.version) return;
     if(state.expiresAt && Date.parse(state.expiresAt)<=Date.now())state={...state,status:'inactive'};
     const same = state.status === 'active' && old?.state.sessionId === state.sessionId;
+    state={...state,readers:state.status==='active'?(state.readers??[]).map(r=>({...r,
+      lastReadSeq:Math.max(r.lastReadSeq,same?old.state.readers?.find(p=>p.userId===r.userId)?.lastReadSeq??0:0)})):[]};
     write(state.conversationId, {state, messages:same ? old.messages : [], draft:same ? old.draft : ''});
   }
   function report(err) {
@@ -109,7 +112,16 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
     const message=current.current[active]?.messages.find(m=>m.id===id);
     if(message?.status==='failed')transmit(message);
   }
+  function markRead(){
+    const room=current.current[active],token=scope.current,seq=contiguousSeq(room?.messages),sessionId=room?.state.sessionId;
+    if(room?.state.status!=='active'||!seq||seq<=(room.state.readers?.find(r=>r.userId===user.id)?.lastReadSeq??0)||reading.current.has(sessionId))return;
+    const request={};reading.current.set(sessionId,request);
+    readAnonymousMessages(active,sessionId,seq).then(({state})=>{if(scope.current===token)apply(state);})
+      .catch(err=>{if(scope.current===token&&err.status===401)report(err);})
+      .finally(()=>{if(reading.current.get(sessionId)===request)reading.current.delete(sessionId);});
+  }
   const room=rooms[active], temporary=room?.state.status==='active';
-  const chat=temporary ? {...viewConversation({id:active,type:'direct',messages:room.messages,hasMore:false},user?.id),temporary:true} : null;
-  return {receive,action,refresh,state:room?.state,ready:!!room,temporary,chat,draft:room?.draft??'',setDraft,send,retry};
+  const chat=temporary ? {...viewConversation({id:active,type:'direct',messages:room.messages,hasMore:false},user?.id),temporary:true,
+    readers:room.state.readers.map(r=>({id:r.userId,lastReadSeq:r.lastReadSeq}))} : null;
+  return {receive,action,refresh,state:room?.state,ready:!!room,temporary,chat,draft:room?.draft??'',setDraft,send,retry,markRead};
 }

@@ -88,5 +88,6 @@ export const joinGroup = id => api(`/conversations/${id}/join`,{method:'POST'});
 export const getAnonymousState = id => api(`/conversations/${id}/anonymous`);
 export const setAnonymousMode = (id, action, expectedId) => api(`/conversations/${id}/anonymous`,{method:'POST',body:{action,id:expectedId}});
 export const sendAnonymousMessage = (id, message) => api(`/conversations/${id}/anonymous/messages`,{method:'POST',body:message});
+export const readAnonymousMessages = (id, sessionId, seq) => api(`/conversations/${id}/anonymous/read`,{method:'PUT',body:{sessionId,seq}});
 // M4 catch-up: messages after a seq (exclusive), oldest first; hasMore = a newer page exists.
 export const getMessagesAfter = (id, afterSeq) => api(`/conversations/${id}/messages?afterSeq=${afterSeq}`);

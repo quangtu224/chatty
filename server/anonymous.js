@@ -13,8 +13,9 @@ export function createAnonymous({pool,auth,limit,isOnline,onState,onMessage,requ
     const job=(queues.get(id)??Promise.resolve()).catch(()=>{}).then(()=>{if(closed)deny(503,'temporary_unavailable','Temporary chat is unavailable.');return work();});
     queues.set(id,job);return job.finally(()=>{if(queues.get(id)===job)queues.delete(id);});
   }
-  const inactive=id=>({conversationId:id,status:'inactive',version:++version,requestId:null,sessionId:null,requestedBy:null,expiresAt:null});
-  const publicState=s=>({conversationId:s.id,status:s.status,version:s.version,requestId:s.requestId,sessionId:s.sessionId,requestedBy:s.requestedBy,expiresAt:s.expiresAt});
+  const inactive=id=>({conversationId:id,status:'inactive',version:++version,requestId:null,sessionId:null,requestedBy:null,expiresAt:null,readers:[]});
+  const publicState=s=>({conversationId:s.id,status:s.status,version:s.version,requestId:s.requestId,sessionId:s.sessionId,requestedBy:s.requestedBy,expiresAt:s.expiresAt,
+    readers:s.members.map(userId=>({userId,lastReadSeq:s.reads.get(userId)??0}))});
   async function members(id,userId){
     if(!UUID.test(id))deny(404,'not_found','Conversation not found.');
     const {rows}=await pool.query('SELECT c.type,cm.user_id FROM chatty.conversations c JOIN chatty.conversation_members cm ON cm.conversation_id=c.id WHERE c.id=$1',[id]);
@@ -25,7 +26,7 @@ export function createAnonymous({pool,auth,limit,isOnline,onState,onMessage,requ
   async function publish(state,users){try{await onState(state,users);}catch{console.error({code:'temporary_state_push_failed'});}}
   async function end(id){
     const old=sessions.get(id);if(!old)return inactive(id);
-    clearTimeout(old.timer);sessions.delete(id);old.messages.clear();
+    clearTimeout(old.timer);sessions.delete(id);old.messages.clear();old.reads.clear();
     const state=inactive(id);await publish(state,old.members);return state;
   }
   function schedule(s,ttl){
@@ -48,7 +49,7 @@ export function createAnonymous({pool,auth,limit,isOnline,onState,onMessage,requ
     if(action==='request'){
       assertOnline(users);
       if(s){if(s.status==='pending'&&s.requestedBy===req.user.id)return res.json({state:publicState(s)});deny(409,'session_exists','Respond to the current request or end the session first.');}
-      s={id,members:users,status:'pending',requestId:randomUUID(),sessionId:null,requestedBy:req.user.id,version:++version,messages:new Map(),seq:0};sessions.set(id,s);schedule(s,requestTtl);
+      s={id,members:users,status:'pending',requestId:randomUUID(),sessionId:null,requestedBy:req.user.id,version:++version,messages:new Map(),reads:new Map(),seq:0};sessions.set(id,s);schedule(s,requestTtl);
     }else{
       if(!['accept','decline','stop'].includes(action))deny(400,'validation_failed','Choose request, accept, decline or stop.');
       if(!s||expected!==(s.status==='active'?s.sessionId:s.requestId))deny(409,'stale_session','This request or session has ended.');
@@ -72,8 +73,17 @@ export function createAnonymous({pool,auth,limit,isOnline,onState,onMessage,requ
     if(!record.delivered){try{await onMessage(record.message,users);record.delivered=true;}catch{deny(503,'temporary_unavailable','Temporary delivery failed. Retry here; no permanent copy was created.');}}
     res.set('Cache-Control','no-store').status(existing?200:201).json({message:record.message});
   }));
+  router.put('/conversations/:id/anonymous/read',route(async(req,res)=>{
+    const id=req.params.id,users=await members(id,req.user.id),s=sessions.get(id),{sessionId,seq}=req.body??{};
+    if(!s||s.status!=='active'||s.sessionId!==sessionId)deny(409,'stale_session','Temporary session ended.');
+    assertOnline(users);
+    if(!Number.isSafeInteger(seq)||seq<0||seq>s.seq)deny(400,'validation_failed','Use a read position within this temporary session.');
+    // Temporary cursors belong to the session, never to persistent conversation_members.
+    const previous=s.reads.get(req.user.id)??0;s.reads.set(req.user.id,Math.max(previous,seq));
+    const state=publicState(s);if(seq>previous)await publish(state,users);res.json({state});
+  }));
   return {router,run,isActive:id=>closed||sessions.get(id)?.status==='active',
     endForUser:userId=>Promise.all([...sessions.values()].filter(s=>s.members.includes(userId)).map(s=>run(s.id,()=>end(s.id)))),
-    close(){closed=true;for(const s of sessions.values()){clearTimeout(s.timer);s.messages.clear();}sessions.clear();},
+    close(){closed=true;for(const s of sessions.values()){clearTimeout(s.timer);s.messages.clear();s.reads.clear();}sessions.clear();},
   };
 }

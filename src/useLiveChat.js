@@ -84,6 +84,8 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   // already has messages, so reconnects and missed pushes never leave holes. A call while
   // one is running asks it for one more round instead of starting a parallel loop.
   const syncing = useRef(new Map());
+  const reading=useRef(new Map());
+  const temporaryIds=useRef(new Map());
   async function catchUp(id, token = scope.current) {
     const running = syncing.current.get(id);
     if (running) { running.again = true; return; }
@@ -141,7 +143,11 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     setLoading(true);
     const socket = io({transports:['websocket']});
     const anonymousEvent=(event,payload)=>{if(scope.current===token)callbacks.current.onAnonymousEvent?.(event,payload);};
-    socket.on('anonymous:state',state=>anonymousEvent('state',state));
+    socket.on('anonymous:state',state=>{
+      const id=state.sessionId??state.requestId??null;
+      if(temporaryIds.current.get(state.conversationId)!==id)setTyping(t=>({...t,[state.conversationId]:[]}));
+      temporaryIds.current.set(state.conversationId,id);anonymousEvent('state',state);
+    });
     socket.on('anonymous:message',message=>anonymousEvent('message',message));
     socket.on('groups:updated',()=>setRoomVersion(n=>n+1));
     socket.on('connect',()=>setRoomVersion(n=>n+1));
@@ -220,9 +226,17 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
           ? {...item, lastReadSeq: Math.max(item.lastReadSeq ?? 0, lastReadSeq), unreadCount: 0} : item));
       else loadDetails(conversationId, token);
     });
+    socket.on('receipt:updated',({conversationId,userId,lastReadSeq})=>{
+      const c=knownChats.current.find(item=>item.id===conversationId);
+      if(!c?.readers?.some(r=>r.id===userId)){loadDetails(conversationId,token);return;}
+      setChats(cs=>cs.map(item=>item.id===conversationId?{...item,readers:item.readers.map(r=>
+        r.id===userId?{...r,lastReadSeq:Math.max(r.lastReadSeq,lastReadSeq)}:r)}:item));
+    });
     reload();
     return () => {
       scope.current = null; socketRef.current = null; socket.disconnect(); syncing.current.clear();
+      reading.current.clear();
+      temporaryIds.current.clear();
       typingTimers.current.forEach(clearTimeout); typingTimers.current.clear();
     };
   }, [user?.id]);
@@ -301,22 +315,23 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     finally { if (scope.current===token) setLoadingOlder(false); }
   }
   // Called by Chat only while the active chat is on screen, the tab is visible and the
-  // history is scrolled to the newest message. Updates the badge at once, then the server.
+  // history is scrolled to the newest message. A confirmed read clears the unread badge.
   function markRead() {
     const c=chats.find(item=>item.id===active), token=scope.current;
     // Only up to the contiguous cursor: never mark unseen messages in a hole as read.
     const seq=contiguousSeq(c?.messages);
-    if (!c || !seq || seq<=(c.lastReadSeq??0)) return;
-    const all=seq>=latestSeq(c.messages);
-    setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:seq,unreadCount:all ? 0 : item.unreadCount} : item));
+    if (!c || !seq || seq<=(c.lastReadSeq??0) || reading.current.has(c.id)) return;
+    // Advance only after confirmation; a failed request must remain retryable.
+    const request={seq};reading.current.set(c.id,request);
     putRead(c.id,seq).then(result=>{
       if (scope.current!==token) return;
       // Another tab may have read further; keep the higher cursor.
-      setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:Math.max(item.lastReadSeq??0,result.lastReadSeq)} : item));
+      setChats(cs=>cs.map(item=>item.id===c.id ? {...item,lastReadSeq:Math.max(item.lastReadSeq??0,result.lastReadSeq),
+        unreadCount:result.lastReadSeq>=Math.max(latestSeq(item.messages),item.lastMessage?.seq??0)?0:item.unreadCount} : item));
     }).catch(err=>{
-      // A failed read update is harmless: the next list refresh restores the true count.
+      // The cursor stays unconfirmed; a later visibility, scroll or message event retries.
       if (scope.current===token && err.status===401) report(err);
-    });
+    }).finally(()=>{if(reading.current.get(c.id)===request)reading.current.delete(c.id);});
   }
   // Group actions. Each resolves after the server confirmed; errors reach the caller.
   async function group(name, memberIds) {
@@ -357,6 +372,6 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   const owned=scope.current?.userId===user?.id;
   const knownPresence=presenceReady&&network==='online',visibleOnline=new Set(online);
   if(knownPresence)visibleOnline.add(user?.id);
-  return {roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),visibleOnline,typing[c.id],knownPresence)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  return {type:on=>signalTyping(active,on),roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),visibleOnline,typing[c.id],knownPresence)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

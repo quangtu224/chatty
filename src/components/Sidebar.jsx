@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Avatar, Brand, IconButton } from "./UI.jsx";
 import RoomDirectory from './RoomDirectory.jsx';
+import {typingText} from '../services/chat-model.js';
 export default function Sidebar({
   chats,
   active,
@@ -78,7 +79,7 @@ export default function Sidebar({
                     </div>
                     <div className="preview-line">
                       <span>
-                        {c.preview || c.messages.at(-1)?.text || "Start the conversation"}
+                        {c.typingPeople?.length?`${typingText(c.typingPeople)}…`:c.preview || c.messages.at(-1)?.text || "Start the conversation"}
                       </span>
                       {c.unread > 0 && (
                         <b

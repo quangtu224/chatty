@@ -5,11 +5,12 @@ import {
   Send,
   Info,
   Check,
+  CheckCheck,
   AlertCircle,
   RotateCw,
   LoaderCircle,
 } from "lucide-react";
-import { Avatar, IconButton, EmptyState, SafeText } from "./UI.jsx";
+import { Avatar, IconButton, EmptyState, SafeText, Modal } from "./UI.jsx";
 import GifPicker from './GifPicker.jsx';
 import { gifUrl, typingText } from '../services/chat-model.js';
 export default function Chat({
@@ -31,6 +32,7 @@ export default function Chat({
   onReadLatest,
   controls,
   sendDisabled,
+  onTypingStop,
 }) {
   const history = useRef(null),
     bottom = useRef(null),
@@ -38,6 +40,7 @@ export default function Chat({
     textarea = useRef(null),
     skipScroll = useRef(false);
   const [away, setAway] = useState(false);
+  const [readerMessage,setReaderMessage]=useState(null);
   const [gifDismissed,setGifDismissed]=useState(false);
   const gifCommand=!chat?.temporary && /^\/gif(?:\s|$)/.test(draft.trimStart()) ? draft.trimStart().slice(4).trim() : null;
   const gifQuery=gifDismissed ? null : gifCommand;
@@ -73,7 +76,8 @@ export default function Chat({
     if (!onReadLatest) return;
     const check = () => {
       const shown = history.current?.getClientRects().length > 0;
-      if (shown && !away && document.visibilityState === "visible") onReadLatest();
+      const atBottom=shown&&history.current.scrollHeight-history.current.scrollTop-history.current.clientHeight<=24;
+      if (atBottom && !away && document.visibilityState === "visible") onReadLatest();
     };
     check();
     document.addEventListener("visibilitychange", check);
@@ -150,6 +154,7 @@ export default function Chat({
         onScroll={() => {
           const e = history.current;
           setAway(e.scrollHeight - e.scrollTop - e.clientHeight > 120);
+          if(e.getClientRects().length&&e.scrollHeight-e.scrollTop-e.clientHeight<=24&&document.visibilityState==='visible')onReadLatest?.();
         }}
         role="log"
         aria-label="Message history"
@@ -185,6 +190,8 @@ export default function Chat({
           </EmptyState>
         ) : (
           chat.messages.map((m, i) => {
+            const readers=(chat.readers??[]).filter(r=>r.id!==m.senderId),seen=readers.filter(r=>r.lastReadSeq>=m.seq);
+            const receipt=readers.length?(seen.length?(chat.type==='group'?`Seen by ${seen.length}`:'Seen'):'Unseen'):'Sent';
             const person =
               m.author === "me"
                 ? profile
@@ -253,7 +260,8 @@ export default function Chat({
                           </>
                         ) : (
                           <>
-                            <Check size={12} /> Sent
+                            {seen.length?<CheckCheck size={12}/>:<Check size={12}/>}
+                            <button className={`receipt-button ${seen.length?'is-seen':''}`} aria-label="View message readers" onClick={()=>setReaderMessage(m.id)}>{receipt}</button>
                           </>
                         )}
                       </div>
@@ -298,6 +306,7 @@ export default function Chat({
             value={draft}
             readOnly={sendDisabled}
             onChange={(e) => {setGifDismissed(false);onDraft(e.target.value);}}
+            onBlur={onTypingStop}
             onKeyDown={(e) => {
               if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifDismissed(true);return;}
               if(e.key==='ArrowDown' && gifQuery!==null && !e.nativeEvent.isComposing){
@@ -329,6 +338,14 @@ export default function Chat({
           <span>Good conversations. Better things built together.</span>
         </div>
       </footer>
+      {readerMessage&&<Modal title="Message readers" onClose={()=>setReaderMessage(null)}>
+        <p className="dialog-description">Seen means this chat was visible and scrolled to the latest message.</p>
+        <div className="reader-list">{(chat.readers??[]).filter(r=>r.id!==chat.messages.find(m=>m.id===readerMessage)?.senderId).map(r=>{
+          const seen=r.lastReadSeq>=(chat.messages.find(m=>m.id===readerMessage)?.seq??Infinity);
+          return <div key={r.id} className="reader-row"><Avatar name={r.avatarId} size={34}/><strong>{r.displayName}</strong>
+            <span className={seen?'reader-seen':''}>{seen?<CheckCheck size={15}/>:<Check size={15}/>} {seen?'Seen':'Unseen'}</span></div>;
+        })}</div>
+      </Modal>}
     </main>
   );
 }

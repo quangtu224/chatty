@@ -62,7 +62,7 @@ export function withPresence(chat, online, typingIds = [], ready = true) {
   const mark = (p) => p && { ...p, online: ready ? online.has(p.id) : undefined };
   const peer = mark(chat.peer);
   const people = chat.people?.map(mark) ?? null;
-  const known = peer ? [peer] : people ?? [];
+  const known = peer ? [peer] : people ?? chat.readers?.map(p=>mark({...p,name:p.displayName,avatar:p.avatarId})) ?? [];
   return { ...chat, peer, people,
     onlineCount: ready ? known.filter((p) => p.online).length : null,
     typingPeople: typingIds.map((id) => known.find((p) => p.id === id) ?? { id, name: 'Someone', avatar: 'forest' }),
@@ -93,6 +93,8 @@ export function contiguousSeq(messages) {
 // Server snapshots (list refresh, details) can trail an optimistic local read. Never move
 // the read cursor back: keep the local cursor and its unread count when it is ahead.
 export function mergeReadState(old, incoming) {
+  if(incoming.readers)incoming={...incoming,readers:incoming.readers.map(r=>({...r,
+    lastReadSeq:Math.max(r.lastReadSeq,old?.readers?.find(p=>p.id===r.id)?.lastReadSeq??0)}))};
   return (old?.lastReadSeq ?? 0) > (incoming.lastReadSeq ?? 0)
     ? { ...incoming, lastReadSeq: old.lastReadSeq, unreadCount: old.unreadCount }
     : incoming;

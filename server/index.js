@@ -70,10 +70,14 @@ if (import.meta.main) {
       await realtime.publishConversation(id);
     },
     onRead: (userId, id, seq) => realtime.publishRead(userId, id, seq),
+    isUserOnline: id => realtime.isOnline(id),
+    onAnonymousState: (state, users) => realtime.publishAnonymousState(state, users),
+    onAnonymousMessage: (message, users) => realtime.publishAnonymousMessage(message, users),
   });
   const server = createServer(app);
   // Attach Socket.IO before listening so writes and pushes share the same runtime.
-  realtime = createRealtime(server, { pool, appOrigin: APP_ORIGIN });
+  realtime = createRealtime(server, { pool, appOrigin: APP_ORIGIN,
+    onUserOffline: id => app.locals.anonymous.endForUser(id) });
   server.listen(Number(port), () => {
     console.log(`Server listening on port ${server.address().port}`);
   });
@@ -81,6 +85,7 @@ if (import.meta.main) {
   const shutdown = async () => {
     if (closing) return;
     closing = true;
+    app.locals.anonymous.close();
     // Bound shutdown so a stuck connection cannot hold a container stop indefinitely.
     // Docker sends SIGTERM and kills after its grace period (15 s in Compose).
     const deadline = setTimeout(() => process.exit(1), 10_000);

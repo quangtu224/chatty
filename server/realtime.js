@@ -50,7 +50,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Repeating the same typing state faster than this is dropped (clients refresh every 3 s).
 const TYPING_THROTTLE_MS = 1000;
 
-export function createRealtime(server, { pool, appOrigin }) {
+export function createRealtime(server, { pool, appOrigin, onUserOffline = async () => {} }) {
   const io = new Server(server, {
     // Browser WebSocket handshakes carry Origin; require it to prevent cross-site sockets.
     transports: ["websocket"],
@@ -106,6 +106,7 @@ export function createRealtime(server, { pool, appOrigin }) {
       if (left > 0) return sockets.set(userId, left);
       sockets.delete(userId);
       announce(userId, false);
+      Promise.resolve(onUserOffline(userId)).catch(() => console.error({code:'temporary_disconnect_failed'}));
     });
 
     // typing:set { conversationId, typing }. Malformed, too frequent or unauthorized
@@ -146,6 +147,9 @@ export function createRealtime(server, { pool, appOrigin }) {
   }
 
   return {
+    isOnline: userId => sockets.has(userId),
+    publishAnonymousState: (state, users) => emitTo(USER_SESSIONS_SQL, [users], 'anonymous:state', state),
+    publishAnonymousMessage: (message, users) => emitTo(USER_SESSIONS_SQL, [users], 'anonymous:message', message),
     async publishMessage(message) {
       await emitTo(RECIPIENTS_SQL, [message.conversationId], "message:created", message);
     },
@@ -161,6 +165,7 @@ export function createRealtime(server, { pool, appOrigin }) {
 
     // Current members' sessions. A closed group has no members, so nothing is sent.
     async publishConversation(conversationId) {
+      io.emit('groups:updated'); // No payload: all authenticated users can refresh public metadata.
       await emitTo(RECIPIENTS_SQL, [conversationId], "conversation:updated", { conversationId });
     },
     // Users who just lost access are no longer members: RECIPIENTS_SQL cannot find them.

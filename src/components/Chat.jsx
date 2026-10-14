@@ -4,14 +4,12 @@ import {
   ArrowDown,
   Send,
   Info,
-  Pin,
   Check,
   AlertCircle,
   RotateCw,
   LoaderCircle,
 } from "lucide-react";
 import { Avatar, IconButton, EmptyState, SafeText } from "./UI.jsx";
-import { people } from "../data.js";
 import GifPicker from './GifPicker.jsx';
 import { gifUrl, typingText } from '../services/chat-model.js';
 export default function Chat({
@@ -31,6 +29,8 @@ export default function Chat({
   onGifSend,
   onReloadHistory,
   onReadLatest,
+  controls,
+  sendDisabled,
 }) {
   const history = useRef(null),
     bottom = useRef(null),
@@ -85,12 +85,9 @@ export default function Chat({
         </EmptyState>
       </main>
     );
-  const online = chat.members.filter(
-    (id) => id !== "me" && people.find((p) => p.id === id)?.online,
-  ).length;
   const submit = () => {
-    if (draft.trim()) {
-      if (chat.live && /^\/gif(?:\s|$)/.test(draft.trim())) {
+    if (!sendDisabled && draft.trim()) {
+      if (!chat.temporary && /^\/gif(?:\s|$)/.test(draft.trim())) {
         setGifQuery(draft.trim().slice(4).trim());
         return;
       }
@@ -116,17 +113,10 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            {/* Live: presence from sockets (M3d); demo: fixture people. */}
-            {chat.live ? (chat.peer && <i className={chat.peer.online ? "status-online" : "status-offline"} />)
-              : <i className={online ? "status-online" : "status-offline"} />}
-            {chat.live ? (chat.peer
+            {!chat.temporary && chat.peer && <i className={chat.peer.online ? "status-online" : "status-offline"} />}
+            {chat.temporary ? 'Memory only · text only · no history recovery' : chat.peer
               ? `${chat.peer.online ? "Online" : "Offline"} · @${chat.peer.handle}`
-              : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}${chat.people ? ` · ${chat.onlineCount} online` : ""}`)
-              : chat.type === "group"
-              ? `${chat.members.length} members · ${online} online`
-              : online
-                ? "Online · Here to chat"
-                : "Offline · Back soon"}
+              : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}${chat.people ? ` · ${chat.onlineCount} online` : ""}`}
           </p>
         </div>
         {onDetails && <button
@@ -142,19 +132,13 @@ export default function Chat({
           </span>
         </button>}
       </header>
+      {controls}
       {network !== "online" && (
         <div className="network-banner" role="status">
           <AlertCircle size={16} />
           {network === "offline"
             ? "You’re offline. Your draft is safe; messages can be retried when you reconnect."
             : "Reconnecting… Getting the conversation back on track."}
-        </div>
-      )}
-      {/* Demo groups have a description; live groups do not store one. */}
-      {chat.type === "group" && chat.description && (
-        <div className="topic-banner">
-          <Pin size={16} />
-          <span>{chat.description}</span>
         </div>
       )}
       <div
@@ -189,14 +173,9 @@ export default function Chat({
               )}
             </button>
           ) : (
-            <span>You’re at the beginning of this conversation.</span>
+            <span>{chat.temporary ? 'Messages disappear when this session ends.' : 'You’re at the beginning of this conversation.'}</span>
           )}
         </div>
-        {chat.messages.some((m) => m.older) && (
-          <div className="date-divider">
-            <span>Yesterday, October 7</span>
-          </div>
-        )}
         {chat.messages.length === 0 ? (
           <EmptyState title="A fresh start.">
             Say hello. Great things start with a small conversation.
@@ -206,25 +185,19 @@ export default function Chat({
             const person =
               m.author === "me"
                 ? profile
-                : chat.live
-                  // Group authors come from the loaded member profiles. Someone who left the
-                  // group is no longer listed; before profiles load, a neutral label.
-                  ? chat.peer ?? chat.people?.find((p) => p.id === m.author) ??
-                    { name: chat.people ? "Former member" : "Member", avatar: "forest" }
-                  : people.find((p) => p.id === m.author) || people[1];
+                : chat.peer ?? chat.people?.find((p) => p.id === m.author) ??
+                    { name: chat.people ? "Former member" : "Member", avatar: "forest" };
             const outgoing = m.author === "me";
             const grouped =
               i > 0 &&
               chat.messages[i - 1].author === m.author &&
               !m.unreadStart &&
-              chat.messages[i - 1].older === m.older &&
-              (!chat.live || chat.messages[i - 1].date === m.date);
+              chat.messages[i - 1].date === m.date;
             return (
               <div key={m.id}>
-                {(chat.live ? i === 0 || m.date !== chat.messages[i - 1]?.date : ((i === 0 && !m.older) ||
-                  (m.older !== chat.messages[i - 1]?.older && !m.older))) && (
+                {(i === 0 || m.date !== chat.messages[i - 1]?.date) && (
                   <div className="date-divider">
-                    <span>{chat.live ? m.date : 'Today, October 8'}</span>
+                    <span>{m.date}</span>
                   </div>
                 )}
                 {m.unreadStart && (
@@ -305,7 +278,6 @@ export default function Chat({
         {gifQuery !== null && <GifPicker query={gifQuery} onCancel={()=>{setGifQuery(null);textarea.current?.focus();}}
           onSelect={gif=>{setAway(false);onGifSend(gif);setGifQuery(null);textarea.current?.focus();}} />}
         <div className="typing" aria-live="polite">
-          {/* typing: the people typing here (live members or the demo's Alice). */}
           {typing?.length > 0 && (
             <>
               <Avatar name={typing[0].avatar} size={23} />
@@ -321,7 +293,7 @@ export default function Chat({
             placeholder={`Message ${chat.name}…`}
             rows={2}
             value={draft}
-            readOnly={gifQuery !== null}
+            readOnly={gifQuery !== null || sendDisabled}
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={(e) => {
               if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifQuery(null);return;}
@@ -338,7 +310,7 @@ export default function Chat({
           <button
             className="send-button"
             aria-label="Send message"
-            disabled={!draft.trim() || gifQuery !== null}
+            disabled={!draft.trim() || gifQuery !== null || sendDisabled}
             onClick={submit}
           >
             <Send size={21} />

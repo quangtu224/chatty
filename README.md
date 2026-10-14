@@ -2,31 +2,21 @@
 
 A calm chat workspace for small teams, with a developer-friendly interface and original pixel-art avatars.
 
-Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. An explicit demo mode provides sample conversations separately.
+Chatty is a full-stack portfolio project in progress. Real accounts and durable direct chat are connected to the frontend through authorized REST APIs and Socket.IO delivery. All conversations require an authenticated server session; there is no demo mode.
 
 ## Live features
 
-- Email/password accounts, public handles, cookie sessions and profile/avatar editing.
+Every signed-in user can browse/search all open rooms and join one (up to 20 members). Only members can read history or send; the directory shows names/counts, never message previews or direct chats. Create a room with a name alone and optional invitees. Removing a member revokes current access but is not a ban: public rooms permit rejoining. The last member leaving closes the room. Existing room names become discoverable with this version; review the rollout before publishing it.
+
+- Username/password accounts, public usernames, cookie sessions and profile/avatar editing.
 - Durable direct/group text and GIF messages, server timestamps, history paging and idempotent retry.
-- Group membership, explicit ownership transfer and realtime access revocation.
+- Global room discovery, self-service Join, owner management and realtime access revocation.
+- Consensual, memory-only anonymous DMs; either participant can end the temporary session.
 - Unread cursors based on visible chat/scroll position; presence across tabs and expiring typing indicators.
 - Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
 - Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.
 
-M1–M4 are implemented. M5 adds Docker/local releases and GitHub CI; hosting is Render (deploys `main` only, after CI passes, via `render.yaml`) with Supabase PostgreSQL. The hosted release is not live yet. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
-
-## Frontend demo features
-
-- Responsive direct and group conversation views.
-- Conversation and teammate search over sample data.
-- Local message composition, multiline input, sending/failed states and retry.
-- Earlier-message fixtures, scroll preservation and Jump to latest.
-- Local group creation and member management with confirmation dialogs.
-- Profile editing, pixel avatars and light/dark themes.
-- Demo controls for loading, typing, offline/reconnecting and message failure.
-- Browser persistence for demo conversations, drafts, profile and theme.
-
-In **Try demo**, conversations, unread counts, presence, typing, delivery, pagination and group permissions are simulated. Live sign-in uses server accounts and cookie sessions. The local demo is not a secure messaging service.
+M1–M4 are implemented. M5 provides Docker/local releases and GitHub CI; hosting uses Render (`main` after CI passes, via `render.yaml`) with Supabase PostgreSQL. The previous hosted baseline was verified on 2026-10-13. The username-only, demo removal, public-room and temporary-DM changes are verified locally and are not deployed yet. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
 
 ## Quick start
 
@@ -37,7 +27,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The app asks the server for an existing session (`GET /api/v1/me`) and otherwise shows sign-in; **Try demo** opens the sample workspace without a server, database or API keys.
+Open the URL printed by Vite. The app asks the server for an existing session (`GET /api/v1/me`) and otherwise shows sign-in. The API and database must be running to chat.
 
 | Command | Purpose |
 | --- | --- |
@@ -53,11 +43,11 @@ Open the URL printed by Vite. The app asks the server for an existing session (`
 | `npm run db:migrate` | Apply ordered SQL migrations with locking and tracking |
 | `npm run test:server` | Local auth, direct-chat and realtime tests (needs PostgreSQL) |
 
-Server startup requires DATABASE_URL, APP_ORIGIN and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Production requires an HTTPS origin and built frontend; local HTTP Compose uses development cookies. The runtime database user has DML-only privileges, separate from the migration owner. Production also requires `sslmode=verify-full` database URLs and sends security headers; set `TRUST_PROXY` behind a hosting proxy (see the operations runbook). These settings are tested locally, not yet on a host.
+Server startup requires DATABASE_URL, APP_ORIGIN (or Render's RENDER_EXTERNAL_URL) and a valid PORT (default 3000). Migrations require MIGRATION_DATABASE_URL. Production requires an HTTPS origin and built frontend; local HTTP Compose uses development cookies. The runtime database user has DML-only privileges, separate from the migration owner. Production requires `sslmode=verify-full` database URLs and sends security headers; set `TRUST_PROXY` behind a hosting proxy (see the operations runbook).
 
 ### Docker/local and CI
 
-For an ungated public demo build without the private test files:
+For a local build without the private test files:
 
 ```sh
 docker compose --env-file .env.example build app
@@ -69,13 +59,23 @@ Open `http://127.0.0.1:3000`. Compose preserves PostgreSQL data, runs migrations
 
 ### M1 development status
 
-M1 is implemented: email/password accounts with public handles, Argon2id hashing, seven-day cookie sessions, CSRF protection, rate-limited auth, profile updates, teammate search and health checks. On 2026-10-09 the PostgreSQL integration tests and real-server browser auth flow were checked. Run `npm run db:migrate`, then `npm run server` alongside `npm run dev`.
+Accounts now register and sign in with username/password only. The API uses `handle` for the normalized username (3–24 ASCII letters/digits/underscores, case-insensitive); duplicates return a field error asking for another username. Signup defaults the display name to the username, editable later in Profile. Passwords and existing account/chat IDs are preserved. Migration 004 makes legacy email nullable without deleting existing values; new accounts do not store an email and user responses omit it. Apply migration 004 before deploying this version. Argon2id, seven-day cookie sessions, CSRF and auth rate limits remain in use.
+
+After email-null accounts are created, rolling back to email-only login prevents those accounts from signing in. Use a username-compatible app revision for rollback; do not reverse migration 004 or invent email addresses for users.
 
 ### M2 development status
 
 M2a provides direct-conversation creation, list/history APIs and durable text-message sends with retry deduplication. M2b pushes newly committed messages to authorized sessions over Socket.IO. It rechecks membership and session expiry for each push and disconnects session tabs on logout or login rotation. Send remains REST; a duplicate retry does not emit again.
 
-M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Drafts use sessionStorage scoped by account and are cleared on sign-out; live messages never use demo storage. Pending sends survive conversation switches but not page reloads. Live presence and typing arrived in M3d (below).
+M2c connects live teammate search, direct conversations, message history, sends and retries. Server sequence numbers reconcile socket pushes and REST acknowledgements into one message. Normal drafts use sessionStorage scoped by account and are cleared on sign-out. Pending sends survive conversation switches but not page reloads. Live presence and typing arrived in M3d (below).
+
+### Temporary anonymous DMs
+
+In a direct conversation, choose **Request anonymous DM**. Both people must be connected; the other person must explicitly accept within 60 seconds. The active session uses neutral labels and text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
+
+Temporary messages, consent and drafts stay in server/browser memory, never PostgreSQL, localStorage or sessionStorage. Normal sends are blocked server-side while the session is active. Losing either person's last socket, logout, expiry or a server restart ends it; disconnecting or reloading a tab clears its temporary content. Messages have no offline recovery. With multiple tabs, closing one tab leaves the session active if another remains connected. The UI and server retain the latest 200 messages/retry acknowledgements; retries outside that window may repeat a message.
+
+This mode avoids persistent history; it does not hide your identity from your existing contact or server, prevent screenshots, or provide end-to-end encryption. Deploy only one backend instance: in-memory consent, delivery and locking are not shared across processes.
 
 M3a/M3b add group REST endpoints (create, details, add/remove members, transfer ownership, leave/close) and per-member read cursors. Unread badges count other people's messages after your cursor. A chat is marked read only while it is on screen, the browser tab is visible and the history is scrolled to the newest message. M3c brings the live group UI: create groups, see real members and authors, and (as owner) add or remove members and transfer ownership; an owner must transfer before leaving. Changes push over Socket.IO: other members update without reloading, a removed member's tabs close the chat, and reading in one tab clears the badge in your other tabs.
 
@@ -89,19 +89,6 @@ Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend
 
 Once Docker Desktop is running, start local PostgreSQL with `docker compose up -d db` and copy `.env.example` to `.env`. Compose creates `chatty` and `chatty_test` on first volume initialization. Do not delete an existing volume to recreate the test database; create it separately if missing. Server tests truncate users/sessions and only accept loopback PostgreSQL URLs targeting `chatty_test`. Never target live or development data.
 
-## Exploring the demo
-
-1. Select a conversation or use **New conversation** to start a local chat.
-2. Send with Enter; use Shift+Enter for a newline. Input composition is supported.
-3. In **Demo controls**, enable **Fail the next message**, send, then retry.
-4. Load earlier messages and use **Jump to latest** after scrolling upward.
-5. Open **Group details** to compare owner and regular-member controls.
-6. Edit your profile or switch themes from the sidebar.
-
-Sign-in and sign-up call the Chatty server; without a running server they show a "couldn’t reach the server" message. Sign-up requires a display name of 1–40 characters, a 3–24 character lowercase handle (letters, digits or underscore), and a password of 10–128 characters. Email validation trims spaces and ignores case; passwords are never trimmed. Signed-in accounts see only their real conversations and no Demo controls. **Try demo** never creates a real account or session.
-
-Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores samples and clears drafts after confirmation, preserving the theme. Demo sign-out returns to sign-in but keeps demo conversations; live sign-out ends the server session. Avoid entering sensitive information.
-
 ## Stack
 
 | Layer | Current | Planned |
@@ -109,13 +96,13 @@ Demo data uses `chatty.*.v1` localStorage keys. **Reset demo data** restores sam
 | Interface | React 19, JavaScript, Bootstrap 5, custom CSS | Preserve the current interface |
 | Tooling | Vite 6, ESLint 10, npm lockfile | Maintain checked builds |
 | Icons/avatars | Lucide React, local SVG assets | Reuse existing assets |
-| Data | Local PostgreSQL; mock fixtures only in demo | Supabase-hosted PostgreSQL |
+| Data | Local PostgreSQL; Supabase PostgreSQL for hosted baseline | Apply migration 004 before releasing username-only auth |
 | Server | Express + pg + Socket.IO: auth, groups/direct chat, recovery, read state, GIF proxy and ephemeral events | Hosted verification |
-| Auth | Server-managed cookie sessions; separate mock mode | Deployment hardening |
+| Auth | Username/password, server-managed cookie sessions | No email recovery flow |
 | Verification | Private model/API/PostgreSQL and multi-user browser suites | Hosted release checks |
 | Delivery | Non-root Docker, local release/rollback, GitHub CI workflow | Cloud CD after hosted setup |
 
-Supabase is planned only as managed PostgreSQL. Supabase Auth and Realtime are not part of this architecture; Express and Socket.IO own those responsibilities. The current verified database is local PostgreSQL 17.
+Supabase serves only as managed PostgreSQL. Express and Socket.IO own auth and realtime. Feature integration tests use isolated local PostgreSQL 17; they never target the hosted database.
 
 ## Repository structure
 
@@ -124,14 +111,16 @@ chatty/
   public/avatars/             Runtime SVG assets
   src/
     components/
-      Auth.jsx               Live sign-in/sign-up and explicit demo entry
+      Auth.jsx               Username/password sign-in/sign-up
       Chat.jsx               History, composer and message states
-      Dialogs.jsx            Conversation, group, profile and demo dialogs
+      Dialogs.jsx            Conversation, group and profile dialogs
+      RoomDirectory.jsx      Discover and join all open groups
+      AnonymousControls.jsx  Request, accept, decline and end temporary DMs
       Sidebar.jsx            Navigation and preferences
       UI.jsx                 Shared UI primitives
-    App.jsx                  Workspace orchestration and isolated demo mode
+    App.jsx                  Authenticated workspace orchestration
     useLiveChat.js           Live chat, read state, events and recovery
-    data.js                  Sample people/messages
+    useAnonymousChat.js      Memory-only temporary messages/drafts
     model.js                 Validation, storage and immutable updates
     styles.css               Theme tokens and responsive layout
     main.jsx                 Entry point
@@ -151,12 +140,12 @@ chatty/
   vite.config.js
 ```
 
-Fixtures are necessary source for the public demo. Test source, dependencies, build outputs, secrets, test artifacts and private design materials are excluded from Git, so `npm test` and `npm run test:server` only run in the author's local checkout.
+Test source, dependencies, build outputs, secrets, test artifacts and private design materials are excluded from Git, so `npm test` and `npm run test:server` only run in the author's local checkout.
 
 ## Roadmap
 
-1. Merge the milestone branches into `main` and require the CI check on `main`.
-2. Create the Render Blueprint from `main`, then record HTTPS smoke and rollback evidence.
+1. Review the four stacked feature branches and apply migration 004 before releasing them through `main` and CI.
+2. Verify the updated hosted flows, proxy/client-IP behavior and hosted rollback.
 3. Record a short demo with test accounts; verify live GIPHY access before claiming it in a hosted release.
 4. Consider pending-send persistence across reloads after the first hosted release.
 
@@ -164,6 +153,6 @@ See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirem
 
 ## Limitations
 
-Uploads, read receipts for others, calls and end-to-end encryption are not complete. Demo group leave only removes local data; it does not prove server ownership transfer. Demo history/dates are fixtures. Optional Google Fonts have system-font fallbacks.
+Uploads, read receipts for others, calls, account recovery and end-to-end encryption are excluded. Presence, consent and temporary DMs require a single server process. Existing group names become visible to every signed-in user on rollout; group history still requires membership. Optional Google Fonts have system-font fallbacks.
 
-No hosted release, production readiness or performance benchmark is claimed. Free hosting has quotas and may pause or sleep; verify current conditions before publishing a live demo.
+The latest feature branches have local verification only. Free hosting has quotas and may pause or sleep; no always-on production capacity is claimed.

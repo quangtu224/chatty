@@ -11,7 +11,7 @@ import { groupNameError } from "../src/model.js";
 //
 // POST   /conversations/groups { name, memberIds }
 //        201 { conversation }. The caller becomes owner and a member. memberIds: an array
-//        of other users' UUIDs; duplicates and the caller's own id are ignored; 1–19 others.
+//        of other users' UUIDs; duplicates and the caller's own id are ignored; 0–19 others.
 //        400 validation_failed (fieldErrors.name | fieldErrors.memberIds, incl. unknown users)
 // GET    /conversations/:id                    200 { conversation } with members | 404
 // POST   /conversations/:id/members { userIds } owner only; existing members are ignored
@@ -25,7 +25,7 @@ import { groupNameError } from "../src/model.js";
 //        204 | 409 transfer_required (owner while others remain) | 409 not_a_group
 //        The last member leaving closes the group (closed_at); history is kept.
 //
-// Outsiders and malformed ids always get 404 not_found (never reveal that a group exists).
+// Details/history remain member-only; the global catalog exposes names/counts for Join.
 // Members who are not the owner get 403 forbidden: they already know the group exists.
 export const MAX_GROUP_MEMBERS = 20;
 
@@ -37,6 +37,14 @@ export const GROUP_SQL = {
   // How many of the given ids ($1 uuid[]) are real users. Compare with the array length
   // (after removing duplicates) to detect unknown ids in one query.
   countUsers: `SELECT count(*)::int AS n FROM chatty.users WHERE id = ANY($1::uuid[])`,
+  countMembers: `SELECT count(*)::int AS n FROM chatty.conversation_members WHERE conversation_id=$1`,
+  catalog: `SELECT c.id,c.name,
+    (SELECT count(*)::int FROM chatty.conversation_members cm WHERE cm.conversation_id=c.id) AS member_count,
+    EXISTS(SELECT 1 FROM chatty.conversation_members cm WHERE cm.conversation_id=c.id AND cm.user_id=$1) AS is_member
+    FROM chatty.conversations c WHERE c.type='group' AND c.closed_at IS NULL
+      AND c.name ILIKE ('%'||$2||'%') AND ($3::uuid IS NULL OR c.id>$3)
+    ORDER BY c.id LIMIT $4`,
+  lockForJoin: `SELECT type,closed_at FROM chatty.conversations WHERE id=$1 FOR UPDATE`,
 
   // New open group owned by $2 with name $1 (already trimmed).
   insertGroup: `
@@ -51,18 +59,14 @@ export const GROUP_SQL = {
     SELECT $1, unnest($2::uuid[])
     ON CONFLICT DO NOTHING`,
 
-  // Step 1 of every membership change ($1 conversation, $2 caller). Returns the group's
-  // state only if the caller is a member (no row -> 404). FOR UPDATE OF c takes the same
+  // Step 1 of every membership change ($1 conversation). After locking, check membership
+  // and count in fresh statements so a lock wait cannot preserve a stale snapshot.
+  // FOR UPDATE OF c takes the same
   // row lock as sending a message, so "remove member" and "that member sends" can never
   // interleave: whichever commits first wins, and a removed member's later send is a 404.
-  // member_count is read under the lock, so the 20-member check cannot race either.
   lockGroup: `
-    SELECT c.type, c.owner_id,
-           (SELECT count(*)::int FROM chatty.conversation_members cm
-            WHERE cm.conversation_id = c.id) AS member_count
+    SELECT c.type, c.owner_id
     FROM chatty.conversations c
-    JOIN chatty.conversation_members me
-      ON me.conversation_id = c.id AND me.user_id = $2
     WHERE c.id = $1
     FOR UPDATE OF c`,
 
@@ -137,6 +141,7 @@ export function groupRoutes({ pool, auth, onGroupChanged = async () => {} }) {
     }
   }
   router.use("/conversations", auth);
+  router.use('/groups',auth);
 
   const notFound = (req, res) =>
     sendError(req, res, 404, "not_found", "Conversation not found.");
@@ -153,9 +158,13 @@ export function groupRoutes({ pool, auth, onGroupChanged = async () => {} }) {
     if (!UUID.test(id)) return notFound(req, res);
     const me = req.user.id;
     const result = await withTransaction(pool, async (db) => {
-      const { rows } = await db.query(GROUP_SQL.lockGroup, [id, me]);
+      const { rows } = await db.query(GROUP_SQL.lockGroup, [id]);
       if (!rows[0]) return { error: [404, "not_found", "Conversation not found."] };
       const group = rows[0];
+      // Separate reads after the row lock see membership changes that committed while we waited.
+      if(!(await db.query('SELECT 1 FROM chatty.conversation_members WHERE conversation_id=$1 AND user_id=$2',[id,me])).rowCount)
+        return {error:[404,'not_found','Conversation not found.']};
+      group.member_count=(await db.query(GROUP_SQL.countMembers,[id])).rows[0].n;
       if (group.type !== "group")
         return { error: [409, "not_a_group", "Direct chats don’t have members to manage."] };
       if (!anyMember && group.owner_id !== me)
@@ -175,13 +184,13 @@ export function groupRoutes({ pool, auth, onGroupChanged = async () => {} }) {
   // Create a group: the caller becomes owner and member; 1–19 other members.
   router.post("/conversations/groups", async (req, res) => {
     const me = req.user.id;
-    const { name, memberIds } = req.body ?? {};
+    const { name, memberIds = [] } = req.body ?? {};
     const fieldErrors = {};
     const nameError = groupNameError(name);
     if (nameError) fieldErrors.name = nameError;
     const others = otherUserIds(memberIds, me);
-    if (!others || others.length < 1 || others.length > MAX_GROUP_MEMBERS - 1)
-      fieldErrors.memberIds = `Choose 1–${MAX_GROUP_MEMBERS - 1} teammates.`;
+    if (!others || others.length > MAX_GROUP_MEMBERS - 1)
+      fieldErrors.memberIds = `Choose up to ${MAX_GROUP_MEMBERS - 1} teammates.`;
     if (Object.keys(fieldErrors).length) return invalid(req, res, fieldErrors);
 
     // Every id must belong to a real user; one count query checks them all.
@@ -198,6 +207,31 @@ export function groupRoutes({ pool, auth, onGroupChanged = async () => {} }) {
     res.status(201).json({ conversation });
   });
 
+  // Discovery contains names/counts only; history and direct chats stay private.
+  router.get('/groups',async(req,res)=>{
+    const query=req.query.query??'',cursor=req.query.cursor??null;
+    if(typeof query!=='string'||query.length>100 || (cursor!==null&&(typeof cursor!=='string'||!UUID.test(cursor))))
+      return invalid(req,res,{query:'Use a search up to 100 characters and a valid room cursor.'});
+    const limit=Math.min(Math.max(Number.parseInt(req.query.limit,10)||20,1),50);
+    const {rows}=await pool.query(GROUP_SQL.catalog,[req.user.id,query.trim().replace(/[\\%_]/g,'\\$&'),cursor,limit+1]);
+    const page=rows.slice(0,limit);
+    res.json({groups:page.map(r=>({id:r.id,name:r.name,memberCount:r.member_count,isMember:r.is_member})),nextCursor:rows.length>limit?page.at(-1).id:null});
+  });
+  router.post('/conversations/:id/join',async(req,res)=>{
+    const {id}=req.params,me=req.user.id;if(!UUID.test(id))return notFound(req,res);
+    const result=await withTransaction(pool,async db=>{
+      const group=(await db.query(GROUP_SQL.lockForJoin,[id])).rows[0];
+      if(!group||group.type!=='group'||group.closed_at)return {error:[404,'not_found','Room not found.']};
+      const member=(await db.query('SELECT 1 FROM chatty.conversation_members WHERE conversation_id=$1 AND user_id=$2',[id,me])).rowCount;
+      if(!member&&(await db.query(GROUP_SQL.countMembers,[id])).rows[0].n>=MAX_GROUP_MEMBERS)
+        return {error:[409,'group_full','This room is full.']};
+      if(!member)await db.query(GROUP_SQL.addMembers,[id,[me]]);
+      return {conversation:await conversationDetails(db,me,id),joined:!member};
+    });
+    if(result.error)return sendError(req,res,...result.error);
+    if(result.joined)await pushChange(req,id);
+    res.json({conversation:result.conversation});
+  });
   // Details for any conversation the caller belongs to (groups and direct chats).
   router.get("/conversations/:id", async (req, res) => {
     const { id } = req.params;

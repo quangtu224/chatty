@@ -25,28 +25,23 @@ export function saveStorage(key, value) {
   }
 }
 export const AVATARS = ["cat", "fox", "raccoon", "owl", "frog", "bear"];
-export function normalizeEmail(email) {
-  return typeof email === "string" ? email.trim().toLowerCase() : "";
+export function normalizeHandle(handle) {
+  return typeof handle === "string" ? handle.trim().toLowerCase() : "";
 }
 export function validateAuth(fields, signup) {
-  const { email, password, name, handle } = fields ?? {};
+  const { password, name, handle } = fields ?? {};
   const errors = {};
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(email)))
-    errors.email = "Enter a valid email address.";
+  if (!/^[a-z0-9_]{3,24}$/.test(normalizeHandle(handle)))
+    errors.handle = "Use 3–24 letters, numbers, or underscores.";
   if (typeof password !== "string" || !password.length)
     errors.password = "Enter your password.";
   else if (signup && (password.length < 10 || password.length > 128))
     errors.password = "Use 10–128 characters.";
   if (
-    signup &&
+    signup && name !== undefined &&
     (typeof name !== "string" || !name.trim() || name.trim().length > 40)
   )
     errors.name = "Use 1–40 characters for your display name.";
-  if (
-    signup &&
-    (typeof handle !== "string" || !/^[a-z0-9_]{3,24}$/.test(handle))
-  )
-    errors.handle = "Use 3–24 lowercase letters, numbers, or underscores.";
   return errors;
 }
 export function validateProfile(fields) {

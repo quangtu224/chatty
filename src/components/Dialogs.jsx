@@ -7,18 +7,13 @@ import {
   UserMinus,
   Crown,
   LogOut,
-  Wifi,
-  WifiOff,
-  RotateCw,
 } from "lucide-react";
 import { Modal, Avatar } from "./UI.jsx";
-import { people } from "../data.js";
 import { AVATARS } from "../model.js";
 // Live user search shared by the new-conversation and add-members dialogs.
-function useUserSearch(live, search, setError) {
+function useUserSearch(search, setError) {
   const [results,setResults]=useState([]), [searching,setSearching]=useState(false);
   useEffect(()=>{
-    if (!live) return;
     let cancelled=false;
     setResults([]); setError('');
     if (!search.trim()) { setSearching(false); return; }
@@ -28,7 +23,7 @@ function useUserSearch(live, search, setError) {
       if (!cancelled) setResults(users.map(p=>({...p,name:p.displayName,avatar:p.avatarId})));
     }).catch(err=>{if (!cancelled) setError(err.message);}).finally(()=>{if(!cancelled)setSearching(false);}),250);
     return ()=>{cancelled=true;clearTimeout(timer);};
-  },[live,search]);
+  },[search]);
   return {results,searching};
 }
 // Picked people stay listed (first) while the search text changes.
@@ -40,19 +35,15 @@ const toggle = (list, item, same = (a) => a === item) =>
 // Prefer a field message from the server (e.g. memberIds) over the generic one.
 const errorText = (err) => Object.values(err.fieldErrors ?? {})[0] ?? err.message;
 
-export function ConversationDialog({ onClose, onDirect, onGroup, live = false }) {
+export function ConversationDialog({ onClose, onDirect, onGroup }) {
   const [tab, setTab] = useState("direct"),
     [search, setSearch] = useState(""),
     [name, setName] = useState(""),
     [members, setMembers] = useState([]),
     [error, setError] = useState("");
   const [busy,setBusy]=useState(false), [picked,setPicked]=useState([]);
-  const {results,searching}=useUserSearch(live,search,setError);
-  const list = live ? (tab === "group" ? withPicked(picked, results) : results) : people.filter(
-    (p) =>
-      p.id !== "me" &&
-      `${p.name} ${p.handle}`.toLowerCase().includes(search.toLowerCase()),
-  );
+  const {results,searching}=useUserSearch(search,setError);
+  const list = tab === "group" ? withPicked(picked, results) : results;
   return (
     <Modal
       title={tab === "direct" ? "Start a conversation" : "Create a group"}
@@ -122,7 +113,7 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
             <span>
               <strong>{p.name}</strong>
               <small>
-                @{p.handle}{!live && ` · ${p.online ? 'Online' : 'Offline'}`}
+                @{p.handle}
               </small>
             </span>
             {tab === "group" ? (
@@ -141,7 +132,7 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
         ))}
         {list.length === 0 && (
           <p className="dialog-description">
-            {searching ? 'Searching…' : live && !search.trim() ? 'Type a name or username to find a teammate.' : 'No teammates found. Try another name.'}
+            {searching ? 'Searching…' : !search.trim() ? 'Type a name or username to find a teammate.' : 'No teammates found. Try another name.'}
           </p>
         )}
       </div>
@@ -158,8 +149,6 @@ export function ConversationDialog({ onClose, onDirect, onGroup, live = false })
             disabled={busy}
             onClick={() => {
               if (!name.trim()) setError("Give your group a name.");
-              else if (!members.length)
-                setError("Choose at least one teammate.");
               else {
                 // Live creation is async: the server's message appears here on failure.
                 setBusy(true);
@@ -258,7 +247,7 @@ export function DetailsDialog({
 }) {
   const owner = chat.owner === "me";
   // The live server refuses an owner leaving while others remain (transfer_required).
-  const mustTransfer = chat.live && owner && chat.members.length > 1;
+  const mustTransfer = owner && chat.members.length > 1;
   return (
     <Modal
       title={chat.type === "group" ? "Group details" : "Contact details"}
@@ -274,21 +263,19 @@ export function DetailsDialog({
       </div>
       <div className="section-label">
         {chat.type === "group"
-          ? (chat.live ? `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}` : `${chat.members.length} members`)
+          ? `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}`
           : "In this conversation"}
         {owner && <span>You’re the owner</span>}
       </div>
-      {chat.live && chat.type === "group" && !chat.people && (
+      {chat.type === "group" && !chat.people && (
         <p className="dialog-description" role="status">Loading members…</p>
       )}
       <div className="member-picker">
         {chat.members.map((id) => {
           const p =
             id === "me"
-              ? { ...profile, id: "me", online: chat.live ? undefined : true }
-              : chat.live
-                ? chat.peer ?? chat.people.find((p) => p.id === id)
-                : people.find((p) => p.id === id);
+              ? { ...profile, id: "me" }
+              : chat.peer ?? chat.people?.find((p) => p.id === id) ?? {name:'Member',avatar:'forest'};
           return (
             <div className="person-row" key={id}>
               <Avatar name={p.avatar} online={p.online} />
@@ -344,9 +331,7 @@ export function DetailsDialog({
             <small>
               {mustTransfer
                 ? "Make someone else the owner before you leave."
-                : chat.live
-                  ? "You’re the last member: leaving closes the group."
-                  : "If you leave, ownership passes to the next member."}
+                : "You’re the last member: leaving closes the group."}
             </small>
           )}
         </div>
@@ -354,18 +339,16 @@ export function DetailsDialog({
     </Modal>
   );
 }
-export function AddMembersDialog({ chat, onClose, onAdd, live = false }) {
+export function AddMembersDialog({ chat, onClose, onAdd }) {
   const [ids, setIds] = useState([]), [picked, setPicked] = useState([]);
   const [search, setSearch] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const {results,searching}=useUserSearch(live,search,setError);
-  // Live: search real users, without current members; demo: the fixture people.
-  const available = live
-    ? withPicked(picked, results.filter((p) => !chat.members.includes(p.id)))
-    : people.filter((p) => !chat.members.includes(p.id));
+  const {results,searching}=useUserSearch(search,setError);
+  // Search real users without current members.
+  const available = withPicked(picked, results.filter((p) => !chat.members.includes(p.id)));
   return (
     <Modal title="Invite a few more minds" onClose={onClose}>
       <p className="dialog-description">Add teammates to {chat.name}.</p>
-      {live && (
+      {(
         <div className="search-box">
           <Search size={16} />
           <input
@@ -397,9 +380,7 @@ export function AddMembersDialog({ chat, onClose, onAdd, live = false }) {
       ))}
       {available.length === 0 && (
         <p className="dialog-description">
-          {!live
-            ? "Everyone’s already here!"
-            : searching
+          {searching
               ? "Searching…"
               : search.trim()
                 ? "No teammates found. Try another name."
@@ -439,84 +420,6 @@ export function ConfirmDialog({ title, text, onClose, onConfirm }) {
           Confirm
         </button>
       </div>
-    </Modal>
-  );
-}
-export function DemoDialog({
-  network,
-  onNetwork,
-  failNext,
-  setFailNext,
-  typing,
-  setTyping,
-  onEmpty,
-  onLoading,
-  onReset,
-  onClose,
-}) {
-  return (
-    <Modal title="Demo controls" onClose={onClose}>
-      <p className="dialog-description">
-        Explore the edges. These controls simulate local states.
-      </p>
-      <div className="field">
-        Connection
-        <div className="network-options">
-          {[
-            ["online", Wifi],
-            ["offline", WifiOff],
-            ["reconnecting", RotateCw],
-          ].map(([value, Icon]) => (
-            <button
-              className={`btn ${network === value ? "btn-primary" : "btn-outline-secondary"}`}
-              key={value}
-              onClick={() => onNetwork(value)}
-            >
-              <Icon size={15} />
-              {value}
-            </button>
-          ))}
-        </div>
-      </div>
-      <label className="switch-row">
-        <span>
-          <strong>Fail the next message</strong>
-          <small>Send a message, then use Retry to recover.</small>
-        </span>
-        <input
-          className="form-check-input"
-          type="checkbox"
-          checked={failNext}
-          onChange={(e) => setFailNext(e.target.checked)}
-        />
-      </label>
-      <label className="switch-row">
-        <span>
-          <strong>Alice is typing</strong>
-          <small>Show the mock typing indicator.</small>
-        </span>
-        <input
-          className="form-check-input"
-          type="checkbox"
-          checked={typing}
-          onChange={(e) => setTyping(e.target.checked)}
-        />
-      </label>
-      <div className="demo-state-actions">
-        <button className="btn btn-outline-secondary" onClick={onEmpty}>
-          Show no conversation selected
-        </button>
-        <button className="btn btn-outline-secondary" onClick={onLoading}>
-          Replay initial loading
-        </button>
-        <button className="btn btn-outline-secondary" onClick={onReset}>
-          Reset demo data
-        </button>
-      </div>
-      <p className="demo-disclosure">
-        Messages, authentication, presence, and network activity are simulated.
-        Sent means stored locally; read receipts are not implemented.
-      </p>
     </Modal>
   );
 }

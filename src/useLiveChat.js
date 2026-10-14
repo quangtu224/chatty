@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { getMe, getConversations, openDirect, getMessages, getMessagesAfter, sendMessage, markRead as putRead,
-  getConversation, createGroup, addMembers, removeMember, transferOwner, leaveGroup } from './services/api.js';
+  getConversation, createGroup, addMembers, removeMember, transferOwner, leaveGroup, joinGroup } from './services/api.js';
 import { mergeMessages, viewConversation, latestSeq, countsAsUnread, withPresence, contiguousSeq, mergeReadState } from './services/chat-model.js';
 import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
 // onRevoked(id, name) runs when another tab, the owner or the server removes my access.
-export default function useLiveChat(user, active, notify, onExpired, onRevoked) {
+export default function useLiveChat(user, active, notify, onExpired, onRevoked, onAnonymousEvent) {
   const [chats, setChats] = useState([]), [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [network, setNetwork] = useState('reconnecting'), [error, setError] = useState('');
   const [historyVersion,setHistoryVersion]=useState(0);
+  const [roomVersion,setRoomVersion]=useState(0);
   const knownChats=useRef(chats); knownChats.current=chats;
-  const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked});
-  callbacks.current = {notify,onExpired,onRevoked};
+  const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked,onAnonymousEvent});
+  callbacks.current = {notify,onExpired,onRevoked,onAnonymousEvent};
   // Groups this tab is leaving: their access-revoked push is expected, not news.
   const leaving = useRef(new Set());
   // M3d presence/typing (ephemeral, never stored). online: contact ids with an open socket;
@@ -138,6 +139,11 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     } catch { /* Storage can be disabled. */ }
     setLoading(true);
     const socket = io({transports:['websocket']});
+    const anonymousEvent=(event,payload)=>{if(scope.current===token)callbacks.current.onAnonymousEvent?.(event,payload);};
+    socket.on('anonymous:state',state=>anonymousEvent('state',state));
+    socket.on('anonymous:message',message=>anonymousEvent('message',message));
+    socket.on('groups:updated',()=>setRoomVersion(n=>n+1));
+    socket.on('connect',()=>setRoomVersion(n=>n+1));
     socketRef.current = socket; typingSent.current = {id:null,at:0};
     const failed = err => { if (scope.current === token) report(err); };
     const checkSession = async reconnect => {
@@ -156,10 +162,12 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     // gap since its contiguous cursor. Loaded chats are known before the refresh renders.
     socket.on('connect', () => {
       setNetwork('online');
+      anonymousEvent('connect');
       const loaded = knownChats.current.filter(c => c.messages?.length).map(c => c.id);
       reload().then(() => loaded.forEach(id => catchUp(id, token)));
     });
     socket.on('disconnect', reason => {
+      anonymousEvent('disconnect');
       // Presence and typing are unknown while disconnected; the next connect sends a snapshot.
       setOnline(new Set()); setTyping({}); typingSent.current = {id:null,at:0};
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
@@ -318,7 +326,9 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     return conversation.id;
   }
   async function add(id, userIds) {
+    const token=scope.current;
     const {conversation}=await addMembers(id, userIds);
+    if(scope.current!==token)return;
     upsert(conversation);
   }
   async function remove(id, userId) {
@@ -326,7 +336,9 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     await loadDetails(id);
   }
   async function transfer(id, userId) {
+    const token=scope.current;
     const {conversation}=await transferOwner(id, userId);
+    if(scope.current!==token)return;
     upsert(conversation);
   }
   async function leave(id) {
@@ -336,8 +348,12 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
       drop(id);
     } finally { leaving.current.delete(id); }
   }
+  async function join(id){
+    const token=scope.current;const {conversation}=await joinGroup(id);
+    if(scope.current!==token)return null;upsert(conversation);setRoomVersion(n=>n+1);return id;
+  }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),online,typing[c.id])) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  return {roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),online,typing[c.id])) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

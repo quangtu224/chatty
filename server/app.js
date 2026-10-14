@@ -20,8 +20,9 @@ import {
 import { conversationRoutes } from "./conversations.js";
 import { groupRoutes } from "./groups.js";
 import { gifSearch } from './gifs.js';
+import {createAnonymous} from './anonymous.js';
 import { withTransaction } from "./db.js";
-import { normalizeEmail, validateAuth, validateProfile } from "../src/model.js";
+import { normalizeHandle, validateAuth, validateProfile } from "../src/model.js";
 
 // Hash of a random password: lets login spend Argon2 time for unknown emails too.
 const DUMMY_HASH = await hashPassword(randomBytes(16).toString("hex"));
@@ -52,18 +53,18 @@ const SECURITY_HEADERS = {
 
 const renameKeys = (errors, names) =>
   Object.fromEntries(Object.entries(errors).map(([k, v]) => [names[k] ?? k, v]));
-const USER_COLUMNS = "id, email, handle, display_name, avatar_id";
+const USER_COLUMNS = "id, handle, display_name, avatar_id";
 
 // Contract (pinned by server/auth.test.js):
 //   JSON errors: { error: { code, message, fieldErrors? }, requestId }
-//   public user: { id, handle, displayName, avatarId }; /me and auth responses add `email`
+//   public user: { id, handle, displayName, avatarId }; email is never exposed
 //
 // GET    /health/live           200 { status: "ok" }
 // GET    /health/ready          200 { status: "ok" } | 503 when the DB is unreachable
 // GET    /api/v1/auth/csrf      200 { csrfToken } and sets CSRF_COOKIE
-// POST   /api/v1/auth/register  { email, password, displayName, handle } -> 201 { user } + session cookie
-//                               400 validation_failed | 409 already_exists (fieldErrors.email or .handle)
-// POST   /api/v1/auth/login     { email, password } -> 200 { user }; deletes any session cookie sent
+// POST   /api/v1/auth/register  { handle, password, displayName? } -> 201 { user } + session cookie
+//                               400 validation_failed | 409 already_exists (fieldErrors.handle)
+// POST   /api/v1/auth/login     { handle, password } -> 200 { user }; deletes any session cookie sent
 //                               401 invalid_credentials (same message for unknown email and wrong password)
 // POST   /api/v1/auth/logout    204, deletes the session, clears the cookie
 // GET    /api/v1/me             200 { user } | 401 unauthenticated
@@ -90,6 +91,9 @@ export function createApp({
   // onRead(userId, conversationId, lastReadSeq).
   onGroupChanged = async () => {},
   onRead = async () => {},
+  isUserOnline = () => false,
+  onAnonymousState = async () => {},
+  onAnonymousMessage = async () => {},
   giphyApiKey = process.env.GIPHY_API_KEY,
   gifFetch = fetch,
   gifRateLimit = {windowMs:60_000,max:20},
@@ -174,51 +178,48 @@ export function createApp({
   });
 
   v1.post("/auth/register", limit, async (req, res) => {
-    const { email, password, displayName, handle } = req.body ?? {};
-    const errors = validateAuth({ email, password, name: displayName, handle }, true);
+    const { password, displayName, handle: rawHandle } = req.body ?? {};
+    const handle = normalizeHandle(rawHandle);
+    const errors = validateAuth({ password, name: displayName, handle }, true);
     if (Object.keys(errors).length)
       return invalid(req, res, renameKeys(errors, { name: "displayName" }));
     const passwordHash = await hashPassword(password);
     try {
       const user = await withTransaction(pool, async (db) => {
         const { rows } = await db.query(
-          `INSERT INTO chatty.users (email, handle, display_name, password_hash)
-           VALUES ($1, $2, $3, $4) RETURNING ${USER_COLUMNS}`,
-          [normalizeEmail(email), handle, displayName.trim(), passwordHash],
+          `INSERT INTO chatty.users (handle, display_name, password_hash)
+           VALUES ($1, $2, $3) RETURNING ${USER_COLUMNS}`,
+          [handle, displayName?.trim() ?? handle, passwordHash],
         );
         await startSession(req, res, db, rows[0].id);
         return rows[0];
       });
       // Revoke the previous socket session only after registration commits.
       onSessionRevoked(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
-      res.status(201).json({ user: toUser(user, true) });
+      res.status(201).json({ user: toUser(user) });
     } catch (err) {
       if (err.code !== "23505") throw err;
-      const field = err.constraint?.includes("email") ? "email" : "handle";
-      sendError(req, res, 409, "already_exists", "That email or handle is already in use.", {
-        [field]:
-          field === "email"
-            ? "An account with this email already exists."
-            : "That handle is taken.",
+      sendError(req, res, 409, "already_exists", "That username is taken. Choose another one.", {
+        handle: "That username is taken. Choose another one.",
       });
     }
   });
 
   v1.post("/auth/login", limit, async (req, res) => {
-    const { email, password } = req.body ?? {};
-    const errors = validateAuth({ email, password }, false);
+    const { handle, password } = req.body ?? {};
+    const errors = validateAuth({ handle, password }, false);
     if (Object.keys(errors).length) return invalid(req, res, errors);
     const { rows } = await pool.query(
-      `SELECT ${USER_COLUMNS}, password_hash FROM chatty.users WHERE email = $1`,
-      [normalizeEmail(email)],
+      `SELECT ${USER_COLUMNS}, password_hash FROM chatty.users WHERE handle = $1`,
+      [normalizeHandle(handle)],
     );
-    // Unknown emails still pay for one Argon2 run, so timing does not reveal accounts.
+    // Unknown usernames still pay for one Argon2 run, so timing does not reveal accounts.
     const valid = await verifyPassword(password, rows[0]?.password_hash ?? DUMMY_HASH);
     if (!rows[0] || !valid)
-      return sendError(req, res, 401, "invalid_credentials", "Email or password is incorrect.");
+      return sendError(req, res, 401, "invalid_credentials", "Username or password is incorrect.");
     await startSession(req, res, pool, rows[0].id);
     onSessionRevoked(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
-    res.json({ user: toUser(rows[0], true) });
+    res.json({ user: toUser(rows[0]) });
   });
 
   v1.post("/auth/logout", async (req, res) => {
@@ -229,7 +230,7 @@ export function createApp({
     res.status(204).end();
   });
 
-  v1.get("/me", auth, (req, res) => res.json({ user: toUser(req.user, true) }));
+  v1.get("/me", auth, (req, res) => res.json({ user: toUser(req.user) }));
 
   v1.patch("/me", auth, async (req, res) => {
     const { displayName, avatarId } = req.body ?? {};
@@ -242,7 +243,7 @@ export function createApp({
        WHERE id = $1 RETURNING ${USER_COLUMNS}`,
       [req.user.id, displayName?.trim() ?? null, avatarId ?? null],
     );
-    res.json({ user: toUser(rows[0], true) });
+    res.json({ user: toUser(rows[0]) });
   });
 
   v1.get("/users", auth, async (req, res) => {
@@ -266,7 +267,10 @@ export function createApp({
     });
   });
 
-  v1.use(conversationRoutes({ pool, auth, sendLimit: rateLimit(sendRateLimit), onMessage, onRead }));
+  const anonymous=createAnonymous({pool,auth,limit:rateLimit(sendRateLimit),isOnline:isUserOnline,onState:onAnonymousState,onMessage:onAnonymousMessage});
+  app.locals.anonymous=anonymous;
+  v1.use(conversationRoutes({pool,auth,sendLimit:rateLimit(sendRateLimit),onMessage,onRead,withMessageLock:anonymous.run,isAnonymousActive:anonymous.isActive}));
+  v1.use(anonymous.router);
   v1.use(groupRoutes({ pool, auth, onGroupChanged }));
   // Separate quota: a provider outage cannot block ordinary text chat.
   v1.get('/gifs',auth,rateLimit(gifRateLimit),gifSearch({apiKey:giphyApiKey,fetchGifs:gifFetch}));

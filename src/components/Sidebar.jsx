@@ -5,10 +5,9 @@ import {
   Moon,
   Settings,
   LogOut,
-  FlaskConical,
 } from "lucide-react";
 import { Avatar, Brand, IconButton } from "./UI.jsx";
-import { people } from "../data.js";
+import RoomDirectory from './RoomDirectory.jsx';
 export default function Sidebar({
   chats,
   active,
@@ -21,7 +20,8 @@ export default function Sidebar({
   onTheme,
   onProfile,
   onLogout,
-  onDemo,
+  onJoin,
+  roomVersion,
 }) {
   const filtered = chats.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()),
@@ -36,6 +36,7 @@ export default function Sidebar({
             aria-label="Search conversations"
             placeholder="Search conversations…"
             value={search}
+            maxLength={100}
             onChange={(e) => setSearch(e.target.value)}
           />
           <kbd>/</kbd>
@@ -47,11 +48,8 @@ export default function Sidebar({
         )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
-        {/* Live mode shows the group section once the account belongs to a group (M3a). */}
-        {(onDemo || chats.some((c) => c.type === "group")
-          ? ["group", "direct"]
-          : ["direct"]
-        ).map((type) => (
+        <RoomDirectory search={search} version={roomVersion} onJoin={onJoin} active={active} chats={chats}/>
+        {['direct'].map((type) => (
           <section key={type}>
             <div className="section-label">
               {type === "group" ? "Group chats" : "Direct messages"}
@@ -67,15 +65,7 @@ export default function Sidebar({
                 >
                   <Avatar
                     name={c.avatar}
-                    online={
-                      c.live
-                        ? c.peer?.online
-                        : type === "direct"
-                        ? people.find(
-                            (p) => c.members.includes(p.id) && p.id !== "me",
-                          )?.online
-                        : undefined
-                    }
+                    online={c.peer?.online}
                     size={42}
                   />
                   <div className="conversation-copy">
@@ -107,24 +97,19 @@ export default function Sidebar({
         {filtered.length === 0 && (
           <div className="search-empty">
             <Search size={25} />
-            <strong>No conversations found</strong>
-            <p>Try another name or start a new chat.</p>
+            <strong>No direct messages found</strong>
+            <p>Try another name or start a direct chat.</p>
           </div>
         )}
       </nav>
       <div className="sidebar-footer">
-        {onDemo && (
-          <button className="demo-link" onClick={onDemo}>
-            <FlaskConical size={15} /> Demo controls <span>Local prototype</span>
-          </button>
-        )}
         <div className="profile-bar">
           <button className="profile-button" onClick={onProfile}>
             <Avatar name={profile.avatar} />
             <span>
               <strong>{profile.name}</strong>
               <small>
-                {onDemo ? <><i /> Available</> : 'Signed in'}
+                Signed in
               </small>
             </span>
           </button>

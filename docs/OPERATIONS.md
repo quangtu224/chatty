@@ -4,7 +4,7 @@ This runbook covers Docker/local and GitHub CI. Hosted PostgreSQL, HTTPS hosting
 
 ## Prerequisites and release
 
-Use Node.js 24.7+, npm, Git and Docker Compose v2. Copy `.env.example` to `.env` without replacing an existing configuration. Start `docker compose up -d db` and install with `npm ci`. The owner's private test files must be present for a gated release; a fresh public clone can build/run a demo but cannot claim those tests passed.
+Use Node.js 24.7+, npm, Git and Docker Compose v2. Copy `.env.example` to `.env` without replacing an existing configuration. Start `docker compose up -d db` and install with `npm ci`. The owner's private test files must be present for a gated release; a fresh public clone can build/run the app but cannot claim those tests passed.
 
 Commit the source first, then run:
 
@@ -94,4 +94,12 @@ Status 2026-10-13: CI passed on GitHub for `m5-delivery`. The Supabase schema is
 
 ## Portfolio evidence and recording
 
-Record a short demo using test accounts only: two-account direct chat; create group/add/transfer/remove; unread while scrolled away; reconnect after more than 30 missed messages; `/gif` with a configured key or clearly labeled unavailable state; Docker health showing SHA. Use desktop and a 360–390px mobile viewport. Avoid showing `.env`, cookies, email/password entry, terminal credentials or private school material. Capture actual behavior before describing it on a CV. A local 20-socket timing check is not evidence of hosted capacity or latency.
+Record a short demo using test accounts only: two-account direct chat; discover/Join group/add/transfer/remove; unread while scrolled away; reconnect after more than 30 missed messages; bilateral temporary-DM consent and cleanup; `/gif` in normal chat with a configured key or clearly labeled unavailable state; Docker health showing SHA. Use desktop and a 360–390px mobile viewport. Avoid showing `.env`, cookies, password entry, terminal credentials or private school material. Capture actual behavior before describing it on a CV. A local 20-socket timing check is not evidence of hosted capacity or latency.
+
+## Username, public-room and temporary-DM rollout
+
+Apply migration 004 with the migration owner before releasing username-only auth. It makes legacy email nullable and preserves existing accounts/history. Deploy frontend/backend together. Once new email-null users register, an older email-only app cannot authenticate them: retain a username-compatible rollback revision, and never undo the migration or populate synthetic email addresses.
+
+Review existing group names before release: every signed-in user can discover them and Join. History remains member-only; removing someone is not a permanent ban because they can rejoin.
+
+Run exactly one backend instance for temporary DMs. Server restarts/deploys end all temporary sessions; messages have no restore or catch-up path. Smoke-test mutual consent, direct-only permissions, blocked normal sends during active mode, no SQL message rows, and cleanup on stop/last disconnect. Browser-only drafts/history must stay in RAM; verify no temporary body in localStorage/sessionStorage. Repeat these checks on the deployed revision before claiming hosted verification.

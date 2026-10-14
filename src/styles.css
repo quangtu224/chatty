@@ -1556,5 +1556,9 @@ kbd {
 .gif-result img { width: 100%; height: 90px; object-fit: cover; }
 .message-gif { display: block; max-width: 100%; width: 240px; max-height: 260px; object-fit: contain; border-radius: 6px; }
 .giphy-attribution { display: block; font-size: 11px; margin-top: 6px; color: inherit; }
+.anonymous-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 20px; border-bottom:1px solid var(--border); font-size:12px; }
+.anonymous-controls > span { flex:1 1 220px; }
+.anonymous-controls small { flex-basis:100%; color:var(--muted); font-size:11px; }
+.anonymous-controls .btn { font-size:12px; }
 .gif-picker-header, .gif-picker p, .gif-picker > .giphy-attribution { flex-shrink: 0; }
 @media (max-width: 600px) { .gif-results { grid-template-columns: repeat(2, minmax(0, 1fr)); } .gif-picker { max-height: 250px; } }

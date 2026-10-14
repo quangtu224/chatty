@@ -5,7 +5,7 @@ import { validateAuth } from "../model.js";
 import { login, register } from "../services/api.js";
 export default function Auth({ onLive, onDemo }) {
   const [signup, setSignup] = useState(false),
-    [fields, setFields] = useState({ name: "", handle: "", email: "", password: "" }),
+    [fields, setFields] = useState({ handle: "", password: "" }),
     [errors, setErrors] = useState({}),
     [busy, setBusy] = useState(false);
   async function submit(e) {
@@ -15,10 +15,10 @@ export default function Auth({ onLive, onDemo }) {
     if (Object.keys(next).length) return;
     setBusy(true);
     try {
-      const { email, password, name, handle } = fields;
+      const { password, handle } = fields;
       const { user } = signup
-        ? await register({ email, password, displayName: name, handle })
-        : await login({ email, password });
+        ? await register({ password, handle })
+        : await login({ handle, password });
       onLive(user);
     } catch (err) {
       setBusy(false);
@@ -67,25 +67,9 @@ export default function Auth({ onLive, onDemo }) {
               ? "Make yourself at home. Your team is waiting."
               : "Pull up a chair. Let’s pick up where we left off."}
           </p>
-          {signup && (
+          {(
             <label className="field">
-              Display name
-              <input
-                className={`form-control ${errors.name ? "is-invalid" : ""}`}
-                autoComplete="nickname"
-                maxLength={40}
-                value={fields.name}
-                onChange={(e) => setFields({ ...fields, name: e.target.value })}
-                aria-invalid={!!errors.name}
-              />
-              {errors.name && (
-                <small className="field-error">{errors.name}</small>
-              )}
-            </label>
-          )}
-          {signup && (
-            <label className="field">
-              Handle
+              Username
               <input
                 className={`form-control ${errors.handle ? "is-invalid" : ""}`}
                 autoComplete="username"
@@ -98,21 +82,6 @@ export default function Auth({ onLive, onDemo }) {
               {errors.handle && <small className="field-error">{errors.handle}</small>}
             </label>
           )}
-          <label className="field">
-            Email address
-            <input
-              className={`form-control ${errors.email ? "is-invalid" : ""}`}
-              type="email"
-              placeholder="you@yourteam.com"
-              autoComplete="email"
-              value={fields.email}
-              onChange={(e) => setFields({ ...fields, email: e.target.value })}
-              aria-invalid={!!errors.email}
-            />
-            {errors.email && (
-              <small className="field-error">{errors.email}</small>
-            )}
-          </label>
           <label className="field">
             Password
             <input
@@ -172,8 +141,8 @@ export default function Auth({ onLive, onDemo }) {
             </button>
           </p>
           <div className="auth-disclosure">
-            Accounts are stored on the Chatty server. Sign up with a 3–24
-            character lowercase handle and a 10–128 character password. Try
+            Use a unique username (3–24 letters, numbers or underscores) and a
+            10–128 character password. No email required. Try
             demo uses sample data in this browser and sends nothing.
           </div>
         </form>

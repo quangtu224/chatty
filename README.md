@@ -6,7 +6,7 @@ Chatty is a full-stack portfolio project in progress. Real accounts and durable 
 
 ## Live features
 
-- Email/password accounts, public handles, cookie sessions and profile/avatar editing.
+- Username/password accounts, public usernames, cookie sessions and profile/avatar editing.
 - Durable direct/group text and GIF messages, server timestamps, history paging and idempotent retry.
 - Group membership, explicit ownership transfer and realtime access revocation.
 - Unread cursors based on visible chat/scroll position; presence across tabs and expiring typing indicators.
@@ -69,7 +69,7 @@ Open `http://127.0.0.1:3000`. Compose preserves PostgreSQL data, runs migrations
 
 ### M1 development status
 
-M1 is implemented: email/password accounts with public handles, Argon2id hashing, seven-day cookie sessions, CSRF protection, rate-limited auth, profile updates, teammate search and health checks. On 2026-10-09 the PostgreSQL integration tests and real-server browser auth flow were checked. Run `npm run db:migrate`, then `npm run server` alongside `npm run dev`.
+Accounts now register and sign in with username/password only. The API uses `handle` for the normalized username (3–24 ASCII letters/digits/underscores, case-insensitive); duplicates return a field error asking for another username. Signup defaults the display name to the username, editable later in Profile. Passwords and existing account/chat IDs are preserved. Migration 004 makes legacy email nullable without deleting existing values; new accounts do not store an email and user responses omit it. Apply migration 004 before deploying this version. Argon2id, seven-day cookie sessions, CSRF and auth rate limits remain in use.
 
 ### M2 development status
 

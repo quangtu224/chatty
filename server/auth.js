@@ -36,14 +36,14 @@ export async function verifyPassword(password, stored) {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-export function toUser(row, withEmail = false) {
+export function toUser(row) {
   const user = {
     id: row.id,
     handle: row.handle,
     displayName: row.display_name,
     avatarId: row.avatar_id,
   };
-  return withEmail ? { ...user, email: row.email } : user;
+  return user;
 }
 
 const hashToken = (token) => crypto.createHash("sha256").update(token).digest();
@@ -62,7 +62,7 @@ export async function createSession(db, userId) {
 export async function findSessionUser(db, token) {
   if (typeof token !== "string" || !token) return null;
   const { rows } = await db.query(
-    `SELECT u.id, u.email, u.handle, u.display_name, u.avatar_id
+    `SELECT u.id, u.handle, u.display_name, u.avatar_id
      FROM chatty.sessions s JOIN chatty.users u ON u.id = s.user_id
      WHERE s.token_hash = $1 AND s.expires_at > now()`,
     [hashToken(token)],

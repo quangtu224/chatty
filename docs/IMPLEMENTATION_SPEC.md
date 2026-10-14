@@ -29,7 +29,7 @@ Source inspection is not browser verification. Initial load checks the server se
 
 ### Identity
 
-Retain email/password login to match the implemented UI, superseding the earlier username-only proposal. Email is private and excluded from search responses. Normalize email consistently without provider-specific alias rewriting.
+Updated requirement (2026-10-14): signup/login use username and password only, with no email field. The API retains `handle` as the username, trims/lowercases it before lookup/uniqueness checks and returns a clear conflict on a duplicate. Signup defaults the editable display name to the username. Migration 004 permits email-null new accounts while preserving legacy values/account IDs/passwords/history; email is never returned to clients.
 
 Add a public unique handle at signup: lowercase ASCII letters/digits/underscore, 3–24 characters. Search handle/display name with bounded paginated results. Display name: 1–40 characters, trimmed. Profile avatar allowlist: cat, fox, raccoon, owl, frog, bear.
 

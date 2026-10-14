@@ -38,7 +38,9 @@ export default function Chat({
     textarea = useRef(null),
     skipScroll = useRef(false);
   const [away, setAway] = useState(false);
-  const [gifQuery,setGifQuery]=useState(null);
+  const [gifDismissed,setGifDismissed]=useState(false);
+  const gifCommand=!chat?.temporary && /^\/gif(?:\s|$)/.test(draft.trimStart()) ? draft.trimStart().slice(4).trim() : null;
+  const gifQuery=gifDismissed ? null : gifCommand;
   useLayoutEffect(() => {
     preserve.current = null;
     skipScroll.current = false;
@@ -87,8 +89,9 @@ export default function Chat({
     );
   const submit = () => {
     if (!sendDisabled && draft.trim()) {
-      if (!chat.temporary && /^\/gif(?:\s|$)/.test(draft.trim())) {
-        setGifQuery(draft.trim().slice(4).trim());
+      if (gifCommand!==null) {
+        setGifDismissed(false);
+        document.querySelector('.gif-picker .gif-result')?.focus();
         return;
       }
       setAway(false);
@@ -275,8 +278,8 @@ export default function Chat({
         </button>
       )}
       <footer className="composer-area">
-        {gifQuery !== null && <GifPicker query={gifQuery} onCancel={()=>{setGifQuery(null);textarea.current?.focus();}}
-          onSelect={gif=>{setAway(false);onGifSend(gif);setGifQuery(null);textarea.current?.focus();}} />}
+        {gifQuery !== null && <GifPicker query={gifQuery} onCancel={()=>{setGifDismissed(true);textarea.current?.focus();}}
+          onSelect={gif=>{setAway(false);onGifSend(gif);textarea.current?.focus();}} />}
         <div className="typing" aria-live="polite">
           {typing?.length > 0 && (
             <>
@@ -293,10 +296,13 @@ export default function Chat({
             placeholder={`Message ${chat.name}…`}
             rows={2}
             value={draft}
-            readOnly={gifQuery !== null || sendDisabled}
-            onChange={(e) => onDraft(e.target.value)}
+            readOnly={sendDisabled}
+            onChange={(e) => {setGifDismissed(false);onDraft(e.target.value);}}
             onKeyDown={(e) => {
-              if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifQuery(null);return;}
+              if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifDismissed(true);return;}
+              if(e.key==='ArrowDown' && gifQuery!==null && !e.nativeEvent.isComposing){
+                const result=document.querySelector('.gif-picker .gif-result');if(result){e.preventDefault();result.focus();}return;
+              }
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&
@@ -310,7 +316,7 @@ export default function Chat({
           <button
             className="send-button"
             aria-label="Send message"
-            disabled={!draft.trim() || gifQuery !== null || sendDisabled}
+            disabled={!draft.trim() || gifCommand !== null || sendDisabled}
             onClick={submit}
           >
             <Send size={21} />

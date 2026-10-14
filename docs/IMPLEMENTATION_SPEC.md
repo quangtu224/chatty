@@ -54,7 +54,7 @@ Normal drafts live in tab session storage keyed by user/conversation. Temporary 
 
 ### GIF messages
 
-Typing `/gif <query>` in normal chat and pressing Enter opens a picker above the composer instead of sending text. It shows up to 8 Giphy results (`rating=g`) with "Powered by GIPHY" attribution; click or Enter sends the selection, Esc cancels and restores the draft. An empty query shows a hint. The Giphy key lives only on the server (`GIPHY_API_KEY`); the browser calls `GET /api/v1/gifs`, never Giphy's API. Temporary DMs are text only and do not open this picker.
+Typing `/gif <query>` in normal chat automatically opens a picker with up to10 safe Giphy results (`rating=g`) after a 400ms debounce. Keep the composer editable and retain input focus on search completion. Clear old results/errors when the keyword changes; ignore late replies. Arrow down/Enter focuses a result; click/Enter sends it. Escape dismisses the current picker and keeps the draft; editing reopens search. An empty query shows a hint. The Giphy key lives only on the server (`GIPHY_API_KEY`); the browser calls `GET /api/v1/gifs`, never Giphy's API. Temporary DMs are text only and do not open this picker.
 
 A GIF message stores `kind = 'gif'`, a Giphy ID (`^[A-Za-z0-9]+$`) and the title as `body` (alt text). Clients render `https://media.giphy.com/media/<id>/giphy.gif` built from the ID; arbitrary stored URLs are never rendered. Retry/idempotency rules match text messages. Viewers' browsers load images from Giphy, which therefore sees their IP addresses; README discloses this. Giphy outages or quota errors return `gif_unavailable` without affecting text chat.
 

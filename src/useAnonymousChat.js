@@ -110,6 +110,6 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
     if(message?.status==='failed')transmit(message);
   }
   const room=rooms[active], temporary=room?.state.status==='active';
-  const chat=temporary ? {...viewConversation({id:active,type:'direct',peer:{displayName:'Anonymous peer',avatarId:'forest'},messages:room.messages,hasMore:false},user?.id),name:'Anonymous DM',temporary:true} : null;
+  const chat=temporary ? {...viewConversation({id:active,type:'direct',messages:room.messages,hasMore:false},user?.id),temporary:true} : null;
   return {receive,action,refresh,state:room?.state,ready:!!room,temporary,chat,draft:room?.draft??'',setDraft,send,retry};
 }

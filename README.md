@@ -71,7 +71,7 @@ M2c connects live teammate search, direct conversations, message history, sends 
 
 ### Temporary anonymous DMs
 
-In a direct conversation, choose **Request anonymous DM**. Both people must be connected; the other person must explicitly accept within 60 seconds. The active session uses neutral labels and text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
+In a direct conversation, choose **Go temporary**. Both people must be connected; the other person must explicitly accept within 60 seconds. A compact status strip shows the invitation or session deadline; **How temporary chat works** opens the privacy details. Names, avatars and presence stay visible as usual. The session uses text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
 
 Temporary messages, consent and drafts stay in server/browser memory, never PostgreSQL, localStorage or sessionStorage. Normal sends are blocked server-side while the session is active. Losing either person's last socket, logout, expiry or a server restart ends it; disconnecting or reloading a tab clears its temporary content. Messages have no offline recovery. With multiple tabs, closing one tab leaves the session active if another remains connected. The UI and server retain the latest 200 messages/retry acknowledgements; retries outside that window may repeat a message.
 

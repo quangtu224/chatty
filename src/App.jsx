@@ -30,6 +30,7 @@ export default function App() {
   },anonymous.receive);
   const chat=liveChat.chats.find(c=>c.id===active);
   const temporary=chat?.type==='direct'&&anonymous.temporary;
+  const displayedChat=temporary?{...chat,...anonymous.chat,name:chat.name,avatar:chat.avatar,peer:chat.peer,historyError:'',historyLoading:false}:chat;
   const profile=user ? {name:user.displayName,avatar:user.avatarId} : null;
   useEffect(()=>()=>clearTimeout(toastTimer.current),[]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;saveStorage('chatty.theme.v1',theme);},[theme]);
@@ -68,14 +69,14 @@ export default function App() {
       onLogout={async()=>{try{await logout();}catch{return notify('We couldn’t sign you out. Try again.','!');}liveChat.clearDrafts();endSession();}} />
     {liveChat.error&&<div role="alert" className="network-banner">{liveChat.error}<button onClick={liveChat.reload}>Retry loading conversations</button></div>}
     {liveChat.loading?<main className="chat-main loading-screen"><Brand/><div className="loading-bars"><i/><i/><i/></div><p>Making room for your conversations…</p></main>
-      :<Chat key={`${chat?.id||'empty'}:${temporary?'temporary':'normal'}`} chat={temporary?anonymous.chat:chat} profile={profile}
+      :<Chat key={`${chat?.id||'empty'}:${temporary?'temporary':'normal'}`} chat={displayedChat} profile={profile}
         draft={temporary?anonymous.draft:liveChat.draft} onDraft={temporary?anonymous.setDraft:liveChat.setDraft}
         onSend={temporary?anonymous.send:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry} onGifSend={liveChat.send}
         onReloadHistory={liveChat.reloadHistory} onReadLatest={temporary?undefined:liveChat.markRead}
         visible={mobileChat} onBack={()=>setMobileChat(false)} onDetails={temporary?undefined:()=>setModal('details')} onOlder={liveChat.older}
         loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={temporary?[]:chat?.typingPeople}
         sendDisabled={chat?.type==='direct'&&(!anonymous.ready||liveChat.network!=='online')}
-        controls={chat?.type==='direct'&&<AnonymousControls state={anonymous.state} userId={user.id} onAction={anonymous.action} onRefresh={anonymous.refresh} online={liveChat.network==='online'}/>}/>
+        controls={chat?.type==='direct'&&<AnonymousControls state={anonymous.state} userId={user.id} peerName={chat.peer.name} onAction={anonymous.action} onRefresh={anonymous.refresh} online={liveChat.network==='online'}/>}/>
     }
     {modal==='new'&&<ConversationDialog onClose={()=>setModal(null)} onDirect={direct} onGroup={group}/>}
     {modal==='profile'&&<ProfileDialog profile={profile} onClose={()=>setModal(null)} theme={theme} onTheme={themeToggle}

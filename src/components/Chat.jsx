@@ -116,8 +116,8 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            {!chat.temporary && typeof chat.peer?.online==='boolean' && <i className={chat.peer.online ? "status-online" : "status-offline"} />}
-            {chat.temporary ? 'Memory only · text only · no history recovery' : chat.peer
+            {typeof chat.peer?.online==='boolean' && <i className={chat.peer.online ? "status-online" : "status-offline"} />}
+            {chat.peer
               ? chat.peer.online===undefined ? 'Checking status…' : `${chat.peer.online ? "Online" : "Offline"} · @${chat.peer.handle}`
               : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}${chat.people && chat.onlineCount!==null ? ` · ${chat.onlineCount} online` : ""}`}
           </p>

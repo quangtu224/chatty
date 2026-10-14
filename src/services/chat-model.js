@@ -58,13 +58,13 @@ export function viewConversation(c, userId) {
 // contact ids with an open socket; `typingIds` are the members typing in this chat.
 // Marks peer/people with `online`, counts online members and resolves typists to profiles
 // (a typist whose profile is not loaded yet shows as "Someone").
-export function withPresence(chat, online, typingIds = []) {
-  const mark = (p) => p && { ...p, online: online.has(p.id) };
+export function withPresence(chat, online, typingIds = [], ready = true) {
+  const mark = (p) => p && { ...p, online: ready ? online.has(p.id) : undefined };
   const peer = mark(chat.peer);
   const people = chat.people?.map(mark) ?? null;
   const known = peer ? [peer] : people ?? [];
   return { ...chat, peer, people,
-    onlineCount: known.filter((p) => p.online).length,
+    onlineCount: ready ? known.filter((p) => p.online).length : null,
     typingPeople: typingIds.map((id) => known.find((p) => p.id === id) ?? { id, name: 'Someone', avatar: 'forest' }),
   };
 }

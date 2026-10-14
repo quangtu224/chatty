@@ -76,14 +76,26 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
   // Presence: open sockets per user id. Online means at least one socket (any tab/session).
   // ponytail: in-memory, one server process only; move to Redis/an adapter when scaling out.
   const sockets = new Map();
+  let presenceQueue=Promise.resolve(),closing=false;
+  // Keep connect/disconnect and membership snapshots in order; delayed SQL cannot win later.
+  function queuePresence(work){presenceQueue=presenceQueue.then(()=>closing?undefined:work()).catch(()=>console.error({code:'presence_push_failed'}));return presenceQueue;}
+  async function snapshot(userId, socket){
+    const {rows:contacts}=await pool.query(CONTACTS_SQL,[userId]);
+    const {rows:sessions}=await pool.query(USER_SESSIONS_SQL,[[userId]]);
+    const payload={userIds:contacts.map(r=>r.user_id).filter(id=>sockets.has(id)),online:true,snapshot:true};
+    if(socket){if(socket.connected)socket.emit('presence:updated',payload);}
+    else if(sessions.length)io.to(sessions.map(r=>sessionRoom(r.token_hash))).emit('presence:updated',payload);
+  }
   // Tells my contacts that I came online or went offline. Best effort: presence is
   // ephemeral, so a database hiccup only delays it until the next change or reconnect.
-  async function announce(userId, online) {
+  async function announce(userId) {
     try {
       const { rows } = await pool.query(CONTACTS_SQL, [userId]);
-      if (rows.length)
-        await emitTo(USER_SESSIONS_SQL, [rows.map((row) => row.user_id)], "presence:updated",
-          { userIds: [userId], online });
+      if (rows.length){
+        const recipients=await pool.query(USER_SESSIONS_SQL,[rows.map(row=>row.user_id)]);
+        if(recipients.rows.length)io.to(recipients.rows.map(row=>sessionRoom(row.token_hash))).emit('presence:updated',
+          {userIds:[userId],online:sockets.has(userId)});
+      }
     } catch {
       console.error({ code: "presence_push_failed" });
     }
@@ -105,7 +117,7 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
       const left = (sockets.get(userId) ?? 1) - 1;
       if (left > 0) return sockets.set(userId, left);
       sockets.delete(userId);
-      announce(userId, false);
+      queuePresence(()=>announce(userId));
       Promise.resolve(onUserOffline(userId)).catch(() => console.error({code:'temporary_disconnect_failed'}));
     });
 
@@ -127,16 +139,9 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
 
     const count = (sockets.get(userId) ?? 0) + 1;
     sockets.set(userId, count);
-    try {
-      // Snapshot for this socket only: which of my contacts are online right now.
-      const { rows } = await pool.query(CONTACTS_SQL, [userId]);
-      const online = rows.map((row) => row.user_id).filter((id) => sockets.has(id));
-      if (socket.connected) socket.emit("presence:updated", { userIds: online, online: true });
-    } catch {
-      console.error({ code: "presence_snapshot_failed" });
-    }
+    await queuePresence(()=>snapshot(userId,socket));
     // First socket of this user: everyone who shares a chat sees them come online.
-    if (count === 1) announce(userId, true);
+    if (count === 1) queuePresence(()=>announce(userId));
   });
 
   // Emits once to every session room the query returns (rows with token_hash).
@@ -164,9 +169,14 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
     //   typing:updated   { conversationId, userId, typing }  the other members
 
     // Current members' sessions. A closed group has no members, so nothing is sent.
-    async publishConversation(conversationId) {
+    async publishConversation(conversationId, revoked=[]) {
       io.emit('groups:updated'); // No payload: all authenticated users can refresh public metadata.
       await emitTo(RECIPIENTS_SQL, [conversationId], "conversation:updated", { conversationId });
+      await queuePresence(async()=>{
+        const {rows}=await pool.query('SELECT user_id FROM chatty.conversation_members WHERE conversation_id=$1',[conversationId]);
+        for(const userId of new Set([...rows.map(r=>r.user_id),...revoked]))
+          if(sockets.has(userId))await snapshot(userId);
+      });
     },
     // Users who just lost access are no longer members: RECIPIENTS_SQL cannot find them.
     async revokeAccess(conversationId, userIds) {
@@ -185,7 +195,8 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
     },
     close() {
       // Socket.IO closes its sockets and the attached HTTP server; disconnect clears timers.
-      return new Promise((resolve, reject) => io.close((err) => err ? reject(err) : resolve()));
+      closing=true;
+      return new Promise((resolve, reject) => io.close((err) => err ? reject(err) : resolve())).then(()=>presenceQueue);
     },
   };
 }

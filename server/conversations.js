@@ -242,6 +242,7 @@ export function conversationRoutes({
   sendLimit,
   onMessage = async () => {},
   onRead = async () => {},
+  onConversation = async () => {},
   withMessageLock = (_id,work) => work(),
   isAnonymousActive = () => false,
 }) {
@@ -300,6 +301,8 @@ export function conversationRoutes({
         "not_found",
         "That teammate doesn’t exist.",
       );
+    // Publish after commit so both already-connected peers get their new contact/presence.
+    if(result.created){try{await onConversation(result.conversation.id);}catch{console.error({requestId:req.id,code:'conversation_push_failed'});}}
     res
       .status(result.created ? 201 : 200)
       .json({ conversation: result.conversation });

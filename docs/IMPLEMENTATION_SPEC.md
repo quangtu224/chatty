@@ -64,6 +64,8 @@ Persist monotonic `last_read_seq` per membership. Advance only for the active vi
 
 Online requires at least one authenticated socket, including multiple tabs. Disconnect detection may be delayed. Throttle typing and expire after five seconds; no typing persistence.
 
+Presence snapshots are authoritative and refreshed on connect, direct creation and membership changes (including revoked members). Serialize presence publication so delayed SQL cannot override newer snapshots. Include the current user in group online counts. Disconnected/uninitialized presence shows unknown; only a completed snapshot determines Offline.
+
 ### Consensual temporary anonymous DM
 
 Direct conversations only. The requester consents by requesting; only the other participant may accept the exact current request ID. Both require an authenticated socket. Pending requests expire after 60 seconds; active sessions expire after 30 minutes. Either can decline/cancel/end. Losing either participant's last socket, auth expiry/logout or server restart ends the session. One remaining tab preserves server consent; disconnect clears that tab's memory.

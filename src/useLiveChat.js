@@ -21,6 +21,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   // M3d presence/typing (ephemeral, never stored). online: contact ids with an open socket;
   // typing: { conversationId: [userId] }, each entry expiring 5 s after its last refresh.
   const [online,setOnline]=useState(()=>new Set()), [typing,setTyping]=useState({});
+  const [presenceReady,setPresenceReady]=useState(false);
   const socketRef=useRef(null), typingTimers=useRef(new Map()), typingSent=useRef({id:null,at:0});
   function setTypist(conversationId, userId, on) {
     const key=`${conversationId}:${userId}`;
@@ -129,7 +130,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   }
   useEffect(() => {
     setChats([]); setDrafts({}); setError(''); setLoadingOlder(false); setLoading(false);
-    setOnline(new Set()); setTyping({});
+    setOnline(new Set()); setTyping({});setPresenceReady(false);
     if (!user) return;
     const token = {userId:user.id}; scope.current = token;
     try {
@@ -169,7 +170,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     socket.on('disconnect', reason => {
       anonymousEvent('disconnect');
       // Presence and typing are unknown while disconnected; the next connect sends a snapshot.
-      setOnline(new Set()); setTyping({}); typingSent.current = {id:null,at:0};
+      setOnline(new Set()); setTyping({});setPresenceReady(false); typingSent.current = {id:null,at:0};
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');
       if (reason === 'io server disconnect') checkSession(true);
     });
@@ -178,11 +179,11 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
       checkSession(false);
     });
     // { userIds, online }: a snapshot right after connecting, then single changes.
-    socket.on('presence:updated', ({ userIds, online: on }) => setOnline(prev => {
-      const next = new Set(prev);
+    socket.on('presence:updated', ({ userIds, online: on, snapshot }) => {if(snapshot)setPresenceReady(true);setOnline(prev => {
+      const next = new Set(snapshot?[]:prev);
       for (const id of userIds) on ? next.add(id) : next.delete(id);
       return next;
-    }));
+    });});
     socket.on('typing:updated', ({ conversationId, userId, typing: on }) => setTypist(conversationId, userId, on));
     // No clearing on message:created: the sender's own typing:false (same socket, in order)
     // ends it, while the REST-driven message push can arrive after they started typing again.
@@ -354,6 +355,8 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   }
   function clearDrafts() { try { sessionStorage.removeItem(key); } catch { /* Storage can be disabled. */ } }
   const owned=scope.current?.userId===user?.id;
-  return {roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),online,typing[c.id])) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  const knownPresence=presenceReady&&network==='online',visibleOnline=new Set(online);
+  if(knownPresence)visibleOnline.add(user?.id);
+  return {roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),visibleOnline,typing[c.id],knownPresence)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

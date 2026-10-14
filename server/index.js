@@ -67,7 +67,7 @@ if (import.meta.main) {
     // Revoke first: a removed member's tabs drop the chat before others see the new list.
     onGroupChanged: async (id, revoked = []) => {
       await realtime.revokeAccess(id, revoked);
-      await realtime.publishConversation(id);
+      await realtime.publishConversation(id, revoked);
     },
     onRead: (userId, id, seq) => realtime.publishRead(userId, id, seq),
     isUserOnline: id => realtime.isOnline(id),

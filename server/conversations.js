@@ -376,6 +376,8 @@ export function conversationRoutes({
       // 1. Lock the conversation row (and prove membership). Parallel sends wait here.
       const locked = await db.query(SQL.lockForSend, [id, me]);
       if (!locked.rowCount) return null;
+      // A membership may have been removed while this request waited for the row lock.
+      if(!(await db.query(SQL.isMember,[id,me])).rowCount)return null;
       // 2. A retry of an already stored message returns the original, unchanged.
       const existing = await db.query(SQL.findSent, [id, me, clientMessageId]);
       if (existing.rowCount) return { row: existing.rows[0], created: false };

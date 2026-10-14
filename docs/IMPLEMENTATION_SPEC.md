@@ -39,7 +39,7 @@ Signup passwords: 10–128 characters, never trimmed. Login validation requires 
 
 One direct conversation per unordered user pair, even under concurrent creation; no self-chat.
 
-Groups: name 1–48 characters, at least two users on creation, maximum 20 including owner. One owner adds/removes members and transfers ownership to an existing member. Owner must transfer before leaving; the last member may close the group without deleting history. Replace the prototype's automatic-transfer copy. Confirm remove/leave actions.
+Updated requirement (2026-10-14): every authenticated user sees/searches all open rooms and can self-Join. Only members read/send; direct messages and room history/previews never enter the public catalog. Rooms: name 1–48 characters, creator only or optional invitees, maximum 20 including owner. Owner manages members and transfers ownership before leaving; the last member closes the room without deleting history. Removal revokes membership, not a permanent ban. Catalog uses bounded UUID-keyset pages/search; Join serializes with membership changes. Confirm remove/leave actions.
 
 New members can read full history. Removed/departed members cannot read, send or receive subsequent group events. Rejoining restores access. Authorize every HTTP/socket operation, not just handshake or button visibility. Membership mutations and message writes lock the same conversation row, defining removal/send races. On revocation evict sockets and invalidate client caches.
 

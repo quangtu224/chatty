@@ -83,5 +83,7 @@ export const addMembers = (id, userIds) => api(`/conversations/${id}/members`, {
 export const removeMember = (id, userId) => api(`/conversations/${id}/members/${userId}`, {method:'DELETE'});
 export const transferOwner = (id, userId) => api(`/conversations/${id}/transfer-owner`, {method:'POST', body:{userId}});
 export const leaveGroup = id => api(`/conversations/${id}/leave`, {method:'POST'});
+export const getGroups = (query='',cursor=null) => api(`/groups?query=${encodeURIComponent(query)}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
+export const joinGroup = id => api(`/conversations/${id}/join`,{method:'POST'});
 // M4 catch-up: messages after a seq (exclusive), oldest first; hasMore = a newer page exists.
 export const getMessagesAfter = (id, afterSeq) => api(`/conversations/${id}/messages?afterSeq=${afterSeq}`);

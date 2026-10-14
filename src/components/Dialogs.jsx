@@ -149,8 +149,6 @@ export function ConversationDialog({ onClose, onDirect, onGroup }) {
             disabled={busy}
             onClick={() => {
               if (!name.trim()) setError("Give your group a name.");
-              else if (!members.length)
-                setError("Choose at least one teammate.");
               else {
                 // Live creation is async: the server's message appears here on failure.
                 setBusy(true);

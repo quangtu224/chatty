@@ -6,9 +6,11 @@ Chatty is a full-stack portfolio project in progress. Real accounts and durable 
 
 ## Live features
 
+Every signed-in user can browse/search all open rooms and join one (up to 20 members). Only members can read history or send; the directory shows names/counts, never message previews or direct chats. Create a room with a name alone and optional invitees. Removing a member revokes current access but is not a ban: public rooms permit rejoining. The last member leaving closes the room. Existing room names become discoverable with this version; review the rollout before publishing it.
+
 - Username/password accounts, public usernames, cookie sessions and profile/avatar editing.
 - Durable direct/group text and GIF messages, server timestamps, history paging and idempotent retry.
-- Group membership, explicit ownership transfer and realtime access revocation.
+- Global room discovery, self-service Join, owner management and realtime access revocation.
 - Unread cursors based on visible chat/scroll position; presence across tabs and expiring typing indicators.
 - Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
 - Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.

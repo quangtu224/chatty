@@ -7,6 +7,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { Avatar, Brand, IconButton } from "./UI.jsx";
+import RoomDirectory from './RoomDirectory.jsx';
 export default function Sidebar({
   chats,
   active,
@@ -19,6 +20,8 @@ export default function Sidebar({
   onTheme,
   onProfile,
   onLogout,
+  onJoin,
+  roomVersion,
 }) {
   const filtered = chats.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()),
@@ -33,6 +36,7 @@ export default function Sidebar({
             aria-label="Search conversations"
             placeholder="Search conversations…"
             value={search}
+            maxLength={100}
             onChange={(e) => setSearch(e.target.value)}
           />
           <kbd>/</kbd>
@@ -44,11 +48,8 @@ export default function Sidebar({
         )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
-        {/* Live mode shows the group section once the account belongs to a group (M3a). */}
-        {(chats.some((c) => c.type === "group")
-          ? ["group", "direct"]
-          : ["direct"]
-        ).map((type) => (
+        <RoomDirectory search={search} version={roomVersion} onJoin={onJoin} active={active}/>
+        {['direct'].map((type) => (
           <section key={type}>
             <div className="section-label">
               {type === "group" ? "Group chats" : "Direct messages"}
@@ -96,8 +97,8 @@ export default function Sidebar({
         {filtered.length === 0 && (
           <div className="search-empty">
             <Search size={25} />
-            <strong>No conversations found</strong>
-            <p>Try another name or start a new chat.</p>
+            <strong>No direct messages found</strong>
+            <p>Try another name or start a direct chat.</p>
           </div>
         )}
       </nav>

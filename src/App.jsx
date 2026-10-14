@@ -59,6 +59,7 @@ export default function App() {
   if(mode==='auth')return <Auth onLive={u=>{setUser(u);setMode('live');setActive(null);}} />;
   return <div className={`workspace ${mobileChat?'show-chat':''}`}>
     <Sidebar chats={liveChat.chats} active={active} onSelect={select} search={search} setSearch={setSearch}
+      roomVersion={liveChat.roomVersion} onJoin={async id=>{const joined=await liveChat.join(id);if(joined)select(joined);}}
       onNew={()=>setModal('new')} profile={profile} theme={theme} onTheme={themeToggle} onProfile={()=>setModal('profile')}
       onLogout={async()=>{try{await logout();}catch{return notify('We couldn’t sign you out. Try again.','!');}liveChat.clearDrafts();endSession();}} />
     {liveChat.error&&<div role="alert" className="network-banner">{liveChat.error}<button onClick={liveChat.reload}>Retry loading conversations</button></div>}

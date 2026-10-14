@@ -161,6 +161,7 @@ export function createRealtime(server, { pool, appOrigin }) {
 
     // Current members' sessions. A closed group has no members, so nothing is sent.
     async publishConversation(conversationId) {
+      io.emit('groups:updated'); // No payload: all authenticated users can refresh public metadata.
       await emitTo(RECIPIENTS_SQL, [conversationId], "conversation:updated", { conversationId });
     },
     // Users who just lost access are no longer members: RECIPIENTS_SQL cannot find them.

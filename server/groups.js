@@ -11,7 +11,7 @@ import { groupNameError } from "../src/model.js";
 //
 // POST   /conversations/groups { name, memberIds }
 //        201 { conversation }. The caller becomes owner and a member. memberIds: an array
-//        of other users' UUIDs; duplicates and the caller's own id are ignored; 1–19 others.
+//        of other users' UUIDs; duplicates and the caller's own id are ignored; 0–19 others.
 //        400 validation_failed (fieldErrors.name | fieldErrors.memberIds, incl. unknown users)
 // GET    /conversations/:id                    200 { conversation } with members | 404
 // POST   /conversations/:id/members { userIds } owner only; existing members are ignored
@@ -25,7 +25,7 @@ import { groupNameError } from "../src/model.js";
 //        204 | 409 transfer_required (owner while others remain) | 409 not_a_group
 //        The last member leaving closes the group (closed_at); history is kept.
 //
-// Outsiders and malformed ids always get 404 not_found (never reveal that a group exists).
+// Details/history remain member-only; the global catalog exposes names/counts for Join.
 // Members who are not the owner get 403 forbidden: they already know the group exists.
 export const MAX_GROUP_MEMBERS = 20;
 
@@ -59,11 +59,11 @@ export const GROUP_SQL = {
     SELECT $1, unnest($2::uuid[])
     ON CONFLICT DO NOTHING`,
 
-  // Step 1 of every membership change ($1 conversation, $2 caller). Returns the group's
-  // state only if the caller is a member (no row -> 404). FOR UPDATE OF c takes the same
+  // Step 1 of every membership change ($1 conversation). After locking, check membership
+  // and count in fresh statements so a lock wait cannot preserve a stale snapshot.
+  // FOR UPDATE OF c takes the same
   // row lock as sending a message, so "remove member" and "that member sends" can never
   // interleave: whichever commits first wins, and a removed member's later send is a 404.
-  // member_count is read under the lock, so the 20-member check cannot race either.
   lockGroup: `
     SELECT c.type, c.owner_id
     FROM chatty.conversations c

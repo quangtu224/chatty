@@ -48,7 +48,7 @@ export default function Sidebar({
         )}
       </div>
       <nav className="conversation-nav" aria-label="Conversations">
-        <RoomDirectory search={search} version={roomVersion} onJoin={onJoin} active={active}/>
+        <RoomDirectory search={search} version={roomVersion} onJoin={onJoin} active={active} chats={chats}/>
         {['direct'].map((type) => (
           <section key={type}>
             <div className="section-label">

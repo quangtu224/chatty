@@ -44,6 +44,11 @@ export const SQL = {
            (SELECT count(*)::int FROM chatty.conversation_members cm
             WHERE cm.conversation_id = c.id) AS member_count,
            me.last_read_seq,
+           -- Readers are visible only through this caller's authorized membership.
+           (SELECT json_agg(json_build_object('id',u.id,'displayName',u.display_name,
+               'avatarId',u.avatar_id,'lastReadSeq',cm.last_read_seq) ORDER BY u.display_name,u.id)
+            FROM chatty.conversation_members cm JOIN chatty.users u ON u.id=cm.user_id
+            WHERE cm.conversation_id=c.id) AS readers,
            -- Messages after my cursor that someone else sent. My own messages never count
            -- as unread. Reads a seq range of the (conversation_id, seq) index.
            (SELECT count(*)::int FROM chatty.messages um
@@ -202,6 +207,7 @@ export async function listConversations(db, userId, conversationId = null) {
     const readState = {
       lastReadSeq: row.last_read_seq,
       unreadCount: row.unread_count,
+      readers: row.readers,
     };
     if (row.type === "group")
       return {
@@ -242,6 +248,7 @@ export function conversationRoutes({
   sendLimit,
   onMessage = async () => {},
   onRead = async () => {},
+  onConversation = async () => {},
   withMessageLock = (_id,work) => work(),
   isAnonymousActive = () => false,
 }) {
@@ -300,6 +307,8 @@ export function conversationRoutes({
         "not_found",
         "That teammate doesn’t exist.",
       );
+    // Publish after commit so both already-connected peers get their new contact/presence.
+    if(result.created){try{await onConversation(result.conversation.id);}catch{console.error({requestId:req.id,code:'conversation_push_failed'});}}
     res
       .status(result.created ? 201 : 200)
       .json({ conversation: result.conversation });

@@ -94,7 +94,7 @@ Status 2026-10-13: CI passed on GitHub for `m5-delivery`. The Supabase schema is
 
 ## Portfolio evidence and recording
 
-Record a short demo using test accounts only: two-account direct chat; discover/Join group/add/transfer/remove; unread while scrolled away; reconnect after more than 30 missed messages; bilateral temporary-DM consent and cleanup; `/gif` in normal chat with a configured key or clearly labeled unavailable state; Docker health showing SHA. Use desktop and a 360–390px mobile viewport. Avoid showing `.env`, cookies, password entry, terminal credentials or private school material. Capture actual behavior before describing it on a CV. A local 20-socket timing check is not evidence of hosted capacity or latency.
+Record a short demo using test accounts only: two-account direct chat; discover/Join group/add/transfer/remove; typing and Seen/Unseen with a group reader list; hidden/scrolled-up chats staying Unseen; reconnect after more than 30 missed messages; temporary-DM consent, real names, memory-only reads and cleanup; type-only `/gif` autocomplete10 with a configured key or clearly labeled unavailable state; Docker health showing SHA. Use desktop and a 360–390px mobile viewport. Avoid showing `.env`, cookies, password entry, terminal credentials or private school material. Capture actual behavior before describing it on a CV. A local 20-socket timing check is not evidence of hosted capacity or latency.
 
 ## Username, public-room and temporary-DM rollout
 
@@ -103,3 +103,5 @@ Apply migration 004 with the migration owner before releasing username-only auth
 Review existing group names before release: every signed-in user can discover them and Join. History remains member-only; removing someone is not a permanent ban because they can rejoin.
 
 Run exactly one backend instance for temporary DMs. Server restarts/deploys end all temporary sessions; messages have no restore or catch-up path. Smoke-test mutual consent, direct-only permissions, blocked normal sends during active mode, no SQL message rows, and cleanup on stop/last disconnect. Browser-only drafts/history must stay in RAM; verify no temporary body in localStorage/sessionStorage. Repeat these checks on the deployed revision before claiming hosted verification.
+
+The interaction-polish release reuses `last_read_seq` and requires no additional migration. Deploy frontend/backend together so ten-result autocomplete, contact snapshots, reader profiles and receipt events share the same contract. Verify two pre-connected accounts become online immediately after opening a new DM; Join/remove/leave refresh presence without leaking stranger IDs. Test DM/group Seen and live reader lists, then confirm temporary read cursors do not change SQL membership cursors. Account-wide presence can outlive a closed tab while another remains connected; unexpected connection loss may wait for heartbeat detection.

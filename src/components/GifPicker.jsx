@@ -7,14 +7,14 @@ export default function GifPicker({query,onSelect,onCancel}) {
   const container=useRef(null);
   useEffect(()=>{
     let cancelled=false;
+    setGifs([]);setError('');setLoading(!!query);
     if(!query) { setError('Add a search after /gif, for example /gif happy.'); return; }
-    searchGifs(query).then(result=>{if(!cancelled)setGifs(result.gifs);})
+    // Debounce keystrokes, and ignore replies from earlier keywords.
+    const timer=setTimeout(()=>searchGifs(query).then(result=>{if(!cancelled)setGifs(result.gifs);})
       .catch(err=>{if(!cancelled)setError(err.message);})
-      .finally(()=>{if(!cancelled)setLoading(false);});
-    return ()=>{cancelled=true;};
+      .finally(()=>{if(!cancelled)setLoading(false);}),400);
+    return ()=>{cancelled=true;clearTimeout(timer);};
   },[query]);
-  // Focus a result after search so Enter selects it; errors focus Cancel instead.
-  useEffect(()=>{(container.current?.querySelector('.gif-result') ?? container.current?.querySelector('button'))?.focus();},[loading]);
   return <section className="gif-picker" aria-label="GIF picker" ref={container} onKeyDown={e=>{
     if(e.key==='Escape'){e.preventDefault();e.stopPropagation();onCancel();}
     if(['ArrowRight','ArrowLeft','ArrowDown','ArrowUp'].includes(e.key)) {
@@ -27,7 +27,7 @@ export default function GifPicker({query,onSelect,onCancel}) {
     }
   }}>
     <div className="gif-picker-header"><strong>GIFs · {query || 'Search'}</strong><button className="text-button" onClick={onCancel}>Cancel (Esc)</button></div>
-    <p role="status">{loading ? 'Searching GIFs…' : error || (gifs.length ? 'Choose a GIF with Enter or click.' : 'No GIFs found. Try another search.')}</p>
+    <p role="status">{loading ? 'Searching GIFs…' : error || (gifs.length ? 'Keep typing to search · Arrow down to browse · Enter or click to send.' : 'No GIFs found. Try another search.')}</p>
     <div className="gif-results">{gifs.map(gif=><button key={gif.id} className="gif-result" aria-label={`Send GIF: ${gif.title}`} onClick={()=>onSelect(gif)}>
       <img src={gifUrl(gif.id)} alt={gif.title} loading="lazy" referrerPolicy="no-referrer" />
     </button>)}</div>

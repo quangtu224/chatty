@@ -269,7 +269,7 @@ export function createApp({
 
   const anonymous=createAnonymous({pool,auth,limit:rateLimit(sendRateLimit),isOnline:isUserOnline,onState:onAnonymousState,onMessage:onAnonymousMessage});
   app.locals.anonymous=anonymous;
-  v1.use(conversationRoutes({pool,auth,sendLimit:rateLimit(sendRateLimit),onMessage,onRead,withMessageLock:anonymous.run,isAnonymousActive:anonymous.isActive}));
+  v1.use(conversationRoutes({pool,auth,sendLimit:rateLimit(sendRateLimit),onMessage,onRead,onConversation:onGroupChanged,withMessageLock:anonymous.run,isAnonymousActive:anonymous.isActive}));
   v1.use(anonymous.router);
   v1.use(groupRoutes({ pool, auth, onGroupChanged }));
   // Separate quota: a provider outage cannot block ordinary text chat.

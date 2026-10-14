@@ -12,11 +12,11 @@ Every signed-in user can browse/search all open rooms and join one (up to 20 mem
 - Durable direct/group text and GIF messages, server timestamps, history paging and idempotent retry.
 - Global room discovery, self-service Join, owner management and realtime access revocation.
 - Consensual, memory-only anonymous DMs; either participant can end the temporary session.
-- Unread cursors based on visible chat/scroll position; presence across tabs and expiring typing indicators.
+- Visible-chat read cursors, Seen/Unseen and group reader lists; presence across tabs and expiring typing indicators.
 - Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
 - Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.
 
-M1–M4 are implemented. M5 provides Docker/local releases and GitHub CI; hosting uses Render (`main` after CI passes, via `render.yaml`) with Supabase PostgreSQL. The previous hosted baseline was verified on 2026-10-13. The username-only, demo removal, public-room and temporary-DM changes are verified locally and are not deployed yet. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
+M1–M4 are implemented. M5 provides Docker/local releases and GitHub CI; Render hosts `main` with Supabase PostgreSQL. The hosted baseline at af8733d includes username-only auth, demo removal, public rooms and temporary DMs; the owner confirmed signup works after making email nullable. The latest GIF autocomplete, presence, temporary-UI and typing/read-receipt improvements are locally verified feature branches pending deployment. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
 
 ## Quick start
 
@@ -71,9 +71,11 @@ M2c connects live teammate search, direct conversations, message history, sends 
 
 ### Temporary anonymous DMs
 
-In a direct conversation, choose **Request anonymous DM**. Both people must be connected; the other person must explicitly accept within 60 seconds. The active session uses neutral labels and text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
+In a direct conversation, choose **Go temporary**. Both people must be connected; the other person must explicitly accept within 60 seconds. A compact status strip shows the invitation or session deadline; **How temporary chat works** opens the privacy details. Names, avatars and presence stay visible as usual. The session uses text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
 
 Temporary messages, consent and drafts stay in server/browser memory, never PostgreSQL, localStorage or sessionStorage. Normal sends are blocked server-side while the session is active. Losing either person's last socket, logout, expiry or a server restart ends it; disconnecting or reloading a tab clears its temporary content. Messages have no offline recovery. With multiple tabs, closing one tab leaves the session active if another remains connected. The UI and server retain the latest 200 messages/retry acknowledgements; retries outside that window may repeat a message.
+
+Typing and Seen/Unseen work in temporary DMs too. Temporary read cursors live only inside the active session; reading temporary text never advances normal message cursors. Names stay visible and no temporary bodies, drafts or read history are written to SQL.
 
 This mode avoids persistent history; it does not hide your identity from your existing contact or server, prevent screenshots, or provide end-to-end encryption. Deploy only one backend instance: in-memory consent, delivery and locking are not shared across processes.
 
@@ -81,9 +83,13 @@ M3a/M3b add group REST endpoints (create, details, add/remove members, transfer 
 
 M3d adds live presence and typing, kept only in server memory. You are online while at least one tab has a socket open; only people who share a conversation with you see it (green dot in the sidebar and header, "N online" in groups). Typing shows "Name is typing" to the other members, stops when you send or clear the draft, and expires after five seconds without keystrokes. Presence assumes a single server process.
 
-M2d adds `/gif <query>`: Enter opens up to eight G-rated results above the composer. Click a result or use arrow keys and Enter to send; Escape cancels and keeps the command draft. An empty query shows a hint. GIF messages use the same durable send/retry path as text.
+Contact snapshots refresh on new direct chats, Join and membership changes, so already-connected teammates appear online without reloading. Authoritative snapshots replace stale contacts; group counts include your own connection. While disconnected or waiting for a snapshot, peer status is unknown rather than Offline. Closing the last tab may take the WebSocket heartbeat interval to be detected; sign-out explicitly closes its sockets.
 
-Set `GIPHY_API_KEY` in the server's `.env` to enable search; never use a `VITE_` key. `GET /api/v1/gifs?query=` requires a session, limits queries to 100 Unicode characters and has a separate rate limit (20/minute per IP). Missing keys, quota exhaustion and provider errors show a GIF-only error; text chat still works. Search uses `rating=g`, limits results to eight and displays attribution following the [GIPHY API documentation](https://developers.giphy.com/docs/api/). Browsers load images directly from `media.giphy.com`, so GIPHY sees each viewer's IP address. Only alphanumeric GIF IDs are stored and used to construct image URLs. Browser/provider tests use controlled search results; a production key and live provider verification are still needed before release.
+Typing appears in the composer and sidebar for direct chats and joined rooms, stops on send/clear/blur, and expires after five seconds. Confirmed outgoing messages show **Seen** or **Unseen**; group messages show **Seen by N**. Click the status to see current members and their read state. Seen means the recipient's chat was on screen, its tab was visible and it was scrolled to the latest message; delivery or simply being online does not mark a message Seen. Hidden/scrolled-up chats remain Unseen. Read cursors reconcile monotonically on reconnect, and failed read requests remain retryable. This feature needs no new database migration.
+
+Typing `/gif <query>` automatically opens up to ten G-rated results above the editable composer after a 400ms debounce. Searches never steal typing focus, and stale replies are ignored. Click a result, or press Arrow down/Enter to focus one and Enter to send; Escape dismisses the picker and keeps the draft. An empty query shows a hint. GIF messages use the same durable send/retry path as text.
+
+Set `GIPHY_API_KEY` in the server's `.env` to enable search; never use a `VITE_` key. `GET /api/v1/gifs?query=` requires a session, limits queries to 100 Unicode characters and has a separate rate limit (20/minute per IP). Missing keys, quota exhaustion and provider errors show a GIF-only error; text chat still works. Search uses `rating=g`, returns at most ten safe results and displays attribution following the [GIPHY API documentation](https://developers.giphy.com/docs/api/). Browsers load images directly from `media.giphy.com`, so GIPHY sees each viewer's IP address. Only alphanumeric GIF IDs are stored and used to construct image URLs. Browser/provider tests use controlled search results; live provider behavior must be verified on the deployed revision.
 
 Realtime uses WebSocket transport only; Vite proxies `/socket.io` to the backend. M4 recovers what was missed: after a reconnect, every loaded chat fetches all messages after its last gap-free position (`afterSeq` pages), a skipped sequence number triggers the same catch-up, and reopening a loaded chat continues from that position instead of jumping to the latest page. Chats are marked read only up to the gap-free position. Signing out clears drafts, search and the open chat before the next account signs in. M2 source and its local acceptance checks are complete; live-provider testing is listed above.
 
@@ -144,7 +150,7 @@ Test source, dependencies, build outputs, secrets, test artifacts and private de
 
 ## Roadmap
 
-1. Review the four stacked feature branches and apply migration 004 before releasing them through `main` and CI.
+1. Review the four interaction-polish branches and release frontend/backend together through `main` and CI; no additional schema migration is needed for these changes.
 2. Verify the updated hosted flows, proxy/client-IP behavior and hosted rollback.
 3. Record a short demo with test accounts; verify live GIPHY access before claiming it in a hosted release.
 4. Consider pending-send persistence across reloads after the first hosted release.
@@ -153,6 +159,6 @@ See the [implementation specification](docs/IMPLEMENTATION_SPEC.md) for requirem
 
 ## Limitations
 
-Uploads, read receipts for others, calls, account recovery and end-to-end encryption are excluded. Presence, consent and temporary DMs require a single server process. Existing group names become visible to every signed-in user on rollout; group history still requires membership. Optional Google Fonts have system-font fallbacks.
+Uploads, calls, account recovery and end-to-end encryption are excluded. Read indicators reflect client visibility/cursor reports, not proof that somebody read the text. Reader lists show current members; departed members are omitted. Presence, consent and temporary DMs require a single server process. Group names are visible to every signed-in user; history still requires membership. Optional Google Fonts have system-font fallbacks.
 
 The latest feature branches have local verification only. Free hosting has quotas and may pause or sleep; no always-on production capacity is claimed.

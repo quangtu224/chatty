@@ -7,6 +7,8 @@ import { ConversationDialog, ProfileDialog, DetailsDialog, AddMembersDialog, Con
 import { readStorage, saveStorage } from './model.js';
 import { getMe, logout, updateMe } from './services/api.js';
 import useLiveChat from './useLiveChat.js';
+import useAnonymousChat from './useAnonymousChat.js';
+import AnonymousControls from './components/AnonymousControls.jsx';
 
 export default function App() {
   const [theme,setTheme]=useState(()=>readStorage('chatty.theme.v1','light'));
@@ -21,11 +23,13 @@ export default function App() {
   function endSession() {
     setUser(null);setMode('auth');setModal(null);setConfirmation(null);setActive(null);setMobileChat(false);setSearch('');
   }
+  const anonymous=useAnonymousChat(mode==='live'?user:null,active,notify,endSession);
   const liveChat=useLiveChat(mode==='live'?user:null,active,notify,endSession,(id,name)=>{
     if(active===id){setActive(null);setMobileChat(false);setModal(null);setConfirmation(null);}
     notify(`You’re no longer in ${name}.`,'!');
-  });
+  },anonymous.receive);
   const chat=liveChat.chats.find(c=>c.id===active);
+  const temporary=chat?.type==='direct'&&anonymous.temporary;
   const profile=user ? {name:user.displayName,avatar:user.avatarId} : null;
   useEffect(()=>()=>clearTimeout(toastTimer.current),[]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;saveStorage('chatty.theme.v1',theme);},[theme]);
@@ -64,10 +68,14 @@ export default function App() {
       onLogout={async()=>{try{await logout();}catch{return notify('We couldn’t sign you out. Try again.','!');}liveChat.clearDrafts();endSession();}} />
     {liveChat.error&&<div role="alert" className="network-banner">{liveChat.error}<button onClick={liveChat.reload}>Retry loading conversations</button></div>}
     {liveChat.loading?<main className="chat-main loading-screen"><Brand/><div className="loading-bars"><i/><i/><i/></div><p>Making room for your conversations…</p></main>
-      :<Chat key={chat?.id||'empty'} chat={chat} profile={profile} draft={liveChat.draft} onDraft={liveChat.setDraft}
-        onSend={()=>liveChat.send()} onRetry={liveChat.retry} onGifSend={liveChat.send} onReloadHistory={liveChat.reloadHistory} onReadLatest={liveChat.markRead}
-        visible={mobileChat} onBack={()=>setMobileChat(false)} onDetails={()=>setModal('details')} onOlder={liveChat.older}
-        loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={chat?.typingPeople}/>
+      :<Chat key={`${chat?.id||'empty'}:${temporary?'temporary':'normal'}`} chat={temporary?anonymous.chat:chat} profile={profile}
+        draft={temporary?anonymous.draft:liveChat.draft} onDraft={temporary?anonymous.setDraft:liveChat.setDraft}
+        onSend={temporary?anonymous.send:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry} onGifSend={liveChat.send}
+        onReloadHistory={liveChat.reloadHistory} onReadLatest={temporary?undefined:liveChat.markRead}
+        visible={mobileChat} onBack={()=>setMobileChat(false)} onDetails={temporary?undefined:()=>setModal('details')} onOlder={liveChat.older}
+        loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={temporary?[]:chat?.typingPeople}
+        sendDisabled={chat?.type==='direct'&&(!anonymous.ready||liveChat.network!=='online')}
+        controls={chat?.type==='direct'&&<AnonymousControls state={anonymous.state} userId={user.id} onAction={anonymous.action} onRefresh={anonymous.refresh} online={liveChat.network==='online'}/>}/>
     }
     {modal==='new'&&<ConversationDialog onClose={()=>setModal(null)} onDirect={direct} onGroup={group}/>}
     {modal==='profile'&&<ProfileDialog profile={profile} onClose={()=>setModal(null)} theme={theme} onTheme={themeToggle}

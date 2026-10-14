@@ -7,15 +7,15 @@ import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
 // onRevoked(id, name) runs when another tab, the owner or the server removes my access.
-export default function useLiveChat(user, active, notify, onExpired, onRevoked) {
+export default function useLiveChat(user, active, notify, onExpired, onRevoked, onAnonymousEvent) {
   const [chats, setChats] = useState([]), [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [network, setNetwork] = useState('reconnecting'), [error, setError] = useState('');
   const [historyVersion,setHistoryVersion]=useState(0);
   const [roomVersion,setRoomVersion]=useState(0);
   const knownChats=useRef(chats); knownChats.current=chats;
-  const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked});
-  callbacks.current = {notify,onExpired,onRevoked};
+  const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked,onAnonymousEvent});
+  callbacks.current = {notify,onExpired,onRevoked,onAnonymousEvent};
   // Groups this tab is leaving: their access-revoked push is expected, not news.
   const leaving = useRef(new Set());
   // M3d presence/typing (ephemeral, never stored). online: contact ids with an open socket;
@@ -139,6 +139,9 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     } catch { /* Storage can be disabled. */ }
     setLoading(true);
     const socket = io({transports:['websocket']});
+    const anonymousEvent=(event,payload)=>{if(scope.current===token)callbacks.current.onAnonymousEvent?.(event,payload);};
+    socket.on('anonymous:state',state=>anonymousEvent('state',state));
+    socket.on('anonymous:message',message=>anonymousEvent('message',message));
     socket.on('groups:updated',()=>setRoomVersion(n=>n+1));
     socket.on('connect',()=>setRoomVersion(n=>n+1));
     socketRef.current = socket; typingSent.current = {id:null,at:0};
@@ -159,10 +162,12 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked) 
     // gap since its contiguous cursor. Loaded chats are known before the refresh renders.
     socket.on('connect', () => {
       setNetwork('online');
+      anonymousEvent('connect');
       const loaded = knownChats.current.filter(c => c.messages?.length).map(c => c.id);
       reload().then(() => loaded.forEach(id => catchUp(id, token)));
     });
     socket.on('disconnect', reason => {
+      anonymousEvent('disconnect');
       // Presence and typing are unknown while disconnected; the next connect sends a snapshot.
       setOnline(new Set()); setTyping({}); typingSent.current = {id:null,at:0};
       setNetwork(navigator.onLine ? 'reconnecting' : 'offline');

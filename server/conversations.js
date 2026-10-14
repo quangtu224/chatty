@@ -242,6 +242,8 @@ export function conversationRoutes({
   sendLimit,
   onMessage = async () => {},
   onRead = async () => {},
+  withMessageLock = (_id,work) => work(),
+  isAnonymousActive = () => false,
 }) {
   const router = express.Router();
   // Every conversation route needs a signed-in user (sets req.user).
@@ -344,7 +346,7 @@ export function conversationRoutes({
   });
 
   // Text and GIFs share the same membership, sequence and idempotency checks.
-  router.post("/conversations/:id/messages", sendLimit, async (req, res) => {
+  router.post("/conversations/:id/messages", sendLimit, async (req, res) => withMessageLock(req.params.id,async () => {
     const { id } = req.params;
     if (!UUID.test(id)) return notFound(req, res);
     const {
@@ -378,6 +380,7 @@ export function conversationRoutes({
       if (!locked.rowCount) return null;
       // A membership may have been removed while this request waited for the row lock.
       if(!(await db.query(SQL.isMember,[id,me])).rowCount)return null;
+      if(isAnonymousActive(id))return {blocked:true};
       // 2. A retry of an already stored message returns the original, unchanged.
       const existing = await db.query(SQL.findSent, [id, me, clientMessageId]);
       if (existing.rowCount) return { row: existing.rows[0], created: false };
@@ -396,6 +399,7 @@ export function conversationRoutes({
       return { row: inserted.rows[0], created: true };
     });
     if (!result) return notFound(req, res);
+    if(result.blocked)return sendError(req,res,409,'temporary_session_active','Anonymous mode is active. Use the temporary composer or end the session.');
     const message = toMessage(result.row);
     if (result.created) {
       try {
@@ -406,7 +410,7 @@ export function conversationRoutes({
       }
     }
     res.status(result.created ? 201 : 200).json({ message });
-  });
+  }));
 
   // Move my read cursor forward: 200 { lastReadSeq }. The answer may be higher than the
   // requested seq when another tab already read further (the cursor never moves back).

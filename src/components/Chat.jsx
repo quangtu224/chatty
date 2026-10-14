@@ -29,6 +29,8 @@ export default function Chat({
   onGifSend,
   onReloadHistory,
   onReadLatest,
+  controls,
+  sendDisabled,
 }) {
   const history = useRef(null),
     bottom = useRef(null),
@@ -84,8 +86,8 @@ export default function Chat({
       </main>
     );
   const submit = () => {
-    if (draft.trim()) {
-      if (/^\/gif(?:\s|$)/.test(draft.trim())) {
+    if (!sendDisabled && draft.trim()) {
+      if (!chat.temporary && /^\/gif(?:\s|$)/.test(draft.trim())) {
         setGifQuery(draft.trim().slice(4).trim());
         return;
       }
@@ -111,8 +113,8 @@ export default function Chat({
             {chat.name}
           </h1>
           <p>
-            {chat.peer && <i className={chat.peer.online ? "status-online" : "status-offline"} />}
-            {chat.peer
+            {!chat.temporary && chat.peer && <i className={chat.peer.online ? "status-online" : "status-offline"} />}
+            {chat.temporary ? 'Memory only · text only · no history recovery' : chat.peer
               ? `${chat.peer.online ? "Online" : "Offline"} · @${chat.peer.handle}`
               : `${chat.memberCount} ${chat.memberCount === 1 ? "member" : "members"}${chat.people ? ` · ${chat.onlineCount} online` : ""}`}
           </p>
@@ -130,6 +132,7 @@ export default function Chat({
           </span>
         </button>}
       </header>
+      {controls}
       {network !== "online" && (
         <div className="network-banner" role="status">
           <AlertCircle size={16} />
@@ -170,7 +173,7 @@ export default function Chat({
               )}
             </button>
           ) : (
-            <span>You’re at the beginning of this conversation.</span>
+            <span>{chat.temporary ? 'Messages disappear when this session ends.' : 'You’re at the beginning of this conversation.'}</span>
           )}
         </div>
         {chat.messages.length === 0 ? (
@@ -290,7 +293,7 @@ export default function Chat({
             placeholder={`Message ${chat.name}…`}
             rows={2}
             value={draft}
-            readOnly={gifQuery !== null}
+            readOnly={gifQuery !== null || sendDisabled}
             onChange={(e) => onDraft(e.target.value)}
             onKeyDown={(e) => {
               if(e.key==='Escape' && gifQuery!==null){e.preventDefault();setGifQuery(null);return;}
@@ -307,7 +310,7 @@ export default function Chat({
           <button
             className="send-button"
             aria-label="Send message"
-            disabled={!draft.trim() || gifQuery !== null}
+            disabled={!draft.trim() || gifQuery !== null || sendDisabled}
             onClick={submit}
           >
             <Send size={21} />

@@ -5,6 +5,8 @@ import {
   Moon,
   Settings,
   LogOut,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { Avatar, Brand, IconButton } from "./UI.jsx";
 import RoomDirectory from './RoomDirectory.jsx';
@@ -23,6 +25,7 @@ export default function Sidebar({
   onLogout,
   onJoin,
   roomVersion,
+  notifications,
 }) {
   const filtered = chats.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()),
@@ -104,6 +107,11 @@ export default function Sidebar({
         )}
       </nav>
       <div className="sidebar-footer">
+        {notifications?.supported&&<button className="notification-toggle" onClick={notifications.toggle}
+          aria-pressed={notifications.enabled} aria-label={notifications.enabled?'Disable notifications':'Enable notifications'}>
+          {notifications.enabled?<Bell size={16}/>:<BellOff size={16}/>}
+          {notifications.enabled?'Notifications on':'Enable notifications'}
+        </button>}
         <div className="profile-bar">
           <button className="profile-button" onClick={onProfile}>
             <Avatar name={profile.avatar} />

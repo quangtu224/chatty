@@ -9,13 +9,16 @@ import { getMe, logout, updateMe } from './services/api.js';
 import useLiveChat from './useLiveChat.js';
 import useAnonymousChat from './useAnonymousChat.js';
 import AnonymousControls from './components/AnonymousControls.jsx';
+import useNotifications from './useNotifications.js';
 
 export default function App() {
   const [theme,setTheme]=useState(()=>readStorage('chatty.theme.v1','light'));
   const [mode,setMode]=useState('checking'),[user,setUser]=useState(null);
   const [active,setActive]=useState(null),[mobileChat,setMobileChat]=useState(false);
+  const [mobile,setMobile]=useState(()=>window.matchMedia('(max-width:700px)').matches);
   const [search,setSearch]=useState(''),[modal,setModal]=useState(null),[confirmation,setConfirmation]=useState(null),[toast,setToast]=useState('');
   const toastTimer=useRef(null);
+  const profileRevision=useRef(0);
   function notify(text,icon='✓') {
     clearTimeout(toastTimer.current);setToast(`${icon} ${text}`);
     toastTimer.current=setTimeout(()=>setToast(''),2800);
@@ -24,10 +27,14 @@ export default function App() {
     setUser(null);setMode('auth');setModal(null);setConfirmation(null);setActive(null);setMobileChat(false);setSearch('');
   }
   const anonymous=useAnonymousChat(mode==='live'?user:null,active,notify,endSession);
+  const notifications=useNotifications(mode==='live'?user:null,mobileChat||!mobile?active:null,select,notify);
   const liveChat=useLiveChat(mode==='live'?user:null,active,notify,endSession,(id,name)=>{
     if(active===id){setActive(null);setMobileChat(false);setModal(null);setConfirmation(null);}
     notify(`You’re no longer in ${name}.`,'!');
-  },anonymous.receive);
+  },anonymous.receive,{incoming:notifications.incoming,profile:(p,live=true)=>{
+    if(live&&p.id===user?.id)profileRevision.current++;
+    setUser(u=>u?.id===p.id?{...u,...p}:u);
+  }});
   const chat=liveChat.chats.find(c=>c.id===active);
   const temporary=chat?.type==='direct'&&anonymous.temporary;
   const displayedChat=temporary?{...chat,...anonymous.chat,name:chat.name,avatar:chat.avatar,peer:chat.peer,historyError:'',historyLoading:false,
@@ -35,6 +42,8 @@ export default function App() {
       avatarId:r.id===user.id?user.avatarId:chat.peer.avatarId}))}:chat;
   const profile=user ? {name:user.displayName,avatar:user.avatarId} : null;
   useEffect(()=>()=>clearTimeout(toastTimer.current),[]);
+  useEffect(()=>{const media=window.matchMedia('(max-width:700px)'),change=()=>setMobile(media.matches);
+    media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   useEffect(()=>{liveChat.type(false);},[temporary]);
   useEffect(()=>{document.documentElement.dataset.theme=theme;saveStorage('chatty.theme.v1',theme);},[theme]);
   useEffect(()=>{
@@ -69,12 +78,19 @@ export default function App() {
     <Sidebar chats={liveChat.chats} active={active} onSelect={select} search={search} setSearch={setSearch}
       roomVersion={liveChat.roomVersion} onJoin={async id=>{const joined=await liveChat.join(id);if(joined)select(joined);}}
       onNew={()=>setModal('new')} profile={profile} theme={theme} onTheme={themeToggle} onProfile={()=>setModal('profile')}
+      notifications={notifications}
       onLogout={async()=>{try{await logout();}catch{return notify('We couldn’t sign you out. Try again.','!');}liveChat.clearDrafts();endSession();}} />
     {liveChat.error&&<div role="alert" className="network-banner">{liveChat.error}<button onClick={liveChat.reload}>Retry loading conversations</button></div>}
+    {anonymous.invitations.length>0&&<aside className="invitation-notice" aria-label="Temporary chat invitations" aria-live="polite">
+      {anonymous.invitations.filter(s=>s.conversationId!==active||(mobile&&!mobileChat)).map(s=><button key={s.requestId} className="invitation-open" aria-label="Open temporary invitation" onClick={()=>select(s.conversationId)}>
+        <strong>Temporary chat invitation</strong><span>{liveChat.chats.find(c=>c.id===s.conversationId)?.name??'A contact'} would like to chat temporarily. Review invitation →</span>
+      </button>)}
+    </aside>}
     {liveChat.loading?<main className="chat-main loading-screen"><Brand/><div className="loading-bars"><i/><i/><i/></div><p>Making room for your conversations…</p></main>
       :<Chat key={`${chat?.id||'empty'}:${temporary?'temporary':'normal'}`} chat={displayedChat} profile={profile}
         draft={temporary?anonymous.draft:liveChat.draft} onDraft={temporary?value=>{anonymous.setDraft(value);liveChat.type(!!value.trim());}:liveChat.setDraft}
-        onSend={temporary?()=>{liveChat.type(false);anonymous.send();}:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry} onGifSend={liveChat.send}
+        onSend={temporary?()=>{liveChat.type(false);anonymous.send();}:()=>liveChat.send()} onRetry={temporary?anonymous.retry:liveChat.retry}
+        onGifSend={gif=>{liveChat.type(false);if(temporary)anonymous.send(gif);else liveChat.send(gif);}}
         onReloadHistory={liveChat.reloadHistory} onReadLatest={temporary?anonymous.markRead:liveChat.markRead}
         visible={mobileChat} onBack={()=>setMobileChat(false)} onDetails={temporary?undefined:()=>setModal('details')} onOlder={liveChat.older}
         loadingOlder={liveChat.loadingOlder} network={liveChat.network} typing={chat?.typingPeople} onTypingStop={()=>liveChat.type(false)}
@@ -83,7 +99,11 @@ export default function App() {
     }
     {modal==='new'&&<ConversationDialog onClose={()=>setModal(null)} onDirect={direct} onGroup={group}/>}
     {modal==='profile'&&<ProfileDialog profile={profile} onClose={()=>setModal(null)} theme={theme} onTheme={themeToggle}
-      onSave={async p=>{setUser((await updateMe({displayName:p.name,avatarId:p.avatar})).user);setModal(null);notify('Looking good. Profile updated.');}}/>}
+      onSave={async p=>{const revision=profileRevision.current,accountId=user.id;
+        const saved=(await updateMe({displayName:p.name,avatarId:p.avatar})).user;
+        // A newer socket profile can arrive before an older tab's save response.
+        if(profileRevision.current===revision)setUser(u=>u?.id===accountId?saved:u);
+        setModal(null);notify('Looking good. Profile updated.');}}/>}
     {modal==='details'&&chat&&!confirmation&&<DetailsDialog chat={chat} profile={profile} onClose={()=>setModal(null)} onMembers={()=>setModal('members')} onRemove={remove} onLeave={leave} onTransfer={transfer}/>}
     {modal==='members'&&chat&&<AddMembersDialog chat={chat} onClose={()=>setModal('details')} onAdd={async ids=>{await liveChat.add(chat.id,ids);setModal('details');notify('A few more minds in the room.');}}/>}
     {confirmation&&<ConfirmDialog title={confirmation.title} text={confirmation.text} onClose={()=>setConfirmation(null)} onConfirm={()=>{confirmation.action();setConfirmation(null);}}/>}

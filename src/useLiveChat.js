@@ -7,15 +7,16 @@ import { messageBodyError } from './model.js';
 
 // Owns live data only. Cleanup invalidates late responses from a previous account.
 // onRevoked(id, name) runs when another tab, the owner or the server removes my access.
-export default function useLiveChat(user, active, notify, onExpired, onRevoked, onAnonymousEvent) {
+export default function useLiveChat(user, active, notify, onExpired, onRevoked, onAnonymousEvent,events={}) {
   const [chats, setChats] = useState([]), [drafts, setDrafts] = useState({});
   const [loading, setLoading] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [network, setNetwork] = useState('reconnecting'), [error, setError] = useState('');
   const [historyVersion,setHistoryVersion]=useState(0);
   const [roomVersion,setRoomVersion]=useState(0);
+  const [profiles,setProfiles]=useState({});
   const knownChats=useRef(chats); knownChats.current=chats;
   const scope = useRef(null), callbacks = useRef({notify,onExpired,onRevoked,onAnonymousEvent});
-  callbacks.current = {notify,onExpired,onRevoked,onAnonymousEvent};
+  callbacks.current = {notify,onExpired,onRevoked,onAnonymousEvent,events};
   // Groups this tab is leaving: their access-revoked push is expected, not news.
   const leaving = useRef(new Set());
   // M3d presence/typing (ephemeral, never stored). online: contact ids with an open socket;
@@ -126,7 +127,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     setChats(cs => conversations.map(c => {
       const old = cs.find(item=>item.id===c.id);
       return {...old,...mergeReadState(old,c), lastMessage: old?.lastMessage?.seq > (c.lastMessage?.seq ?? 0) ? old.lastMessage : c.lastMessage,
-        messages:old?.messages ?? [], hasMore:old?.hasMore};
+        memberProfiles:c.type==='group'?c.readers:old?.memberProfiles,messages:old?.messages ?? [], hasMore:old?.hasMore};
     }));
     setError('');
   }
@@ -135,6 +136,7 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     setOnline(new Set()); setTyping({});setPresenceReady(false);
     if (!user) return;
     const token = {userId:user.id}; scope.current = token;
+    let profileRevision=0;
     try {
       const saved=JSON.parse(sessionStorage.getItem(key) || '{}');
       if(saved && typeof saved==='object' && !Array.isArray(saved))
@@ -147,8 +149,15 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
       const id=state.sessionId??state.requestId??null;
       if(temporaryIds.current.get(state.conversationId)!==id)setTyping(t=>({...t,[state.conversationId]:[]}));
       temporaryIds.current.set(state.conversationId,id);anonymousEvent('state',state);
+      if(scope.current===token)callbacks.current.events.incoming?.('anonymous:state',state);
     });
-    socket.on('anonymous:message',message=>anonymousEvent('message',message));
+    socket.on('anonymous:message',message=>{anonymousEvent('message',message);
+      if(scope.current===token)callbacks.current.events.incoming?.('anonymous:message',message);});
+    socket.on('profile:updated',profile=>{
+      if(scope.current!==token)return;
+      if(profile.id===user.id)profileRevision++;
+      setProfiles(ps=>({...ps,[profile.id]:profile}));callbacks.current.events.profile?.(profile);
+    });
     socket.on('groups:updated',()=>setRoomVersion(n=>n+1));
     socket.on('connect',()=>setRoomVersion(n=>n+1));
     socketRef.current = socket; typingSent.current = {id:null,at:0};
@@ -168,6 +177,13 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     // (Re)connect: refresh the list (memberships, unread), then fill every loaded chat's
     // gap since its contiguous cursor. Loaded chats are known before the refresh renders.
     socket.on('connect', () => {
+      setProfiles({});
+      const revision=profileRevision;
+      getMe().then(({user:profile})=>{if(scope.current===token){
+        if(profile.id!==user.id){clearDrafts();callbacks.current.onExpired();}
+        // A profile saved while this request was in flight is newer than its snapshot.
+        else if(profileRevision===revision)callbacks.current.events.profile?.(profile,false);
+      }}).catch(failed);
       setNetwork('online');
       anonymousEvent('connect');
       const loaded = knownChats.current.filter(c => c.messages?.length).map(c => c.id);
@@ -194,6 +210,8 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
     // No clearing on message:created: the sender's own typing:false (same socket, in order)
     // ends it, while the REST-driven message push can arrive after they started typing again.
     socket.on('message:created', message => {
+      if(scope.current!==token)return;
+      callbacks.current.events.incoming?.('message:created',message);
       // Known chats update immediately, even if an unrelated list request fails.
       // Raise the badge first: countsAsUnread compares against the state before the merge.
       const known=knownChats.current.find(c=>c.id===message.conversationId);
@@ -372,6 +390,9 @@ export default function useLiveChat(user, active, notify, onExpired, onRevoked, 
   const owned=scope.current?.userId===user?.id;
   const knownPresence=presenceReady&&network==='online',visibleOnline=new Set(online);
   if(knownPresence)visibleOnline.add(user?.id);
-  return {type:on=>signalTyping(active,on),roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(c,user?.id),visibleOnline,typing[c.id],knownPresence)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
+  // Profile pushes override older HTTP snapshots in every profile-bearing part of the UI.
+  const profile=p=>p&&({...p,...profiles[p.id]});
+  const viewed=c=>({...c,peer:profile(c.peer),readers:c.readers?.map(profile),memberProfiles:c.memberProfiles?.map(profile)});
+  return {type:on=>signalTyping(active,on),roomVersion,join,chats:owned ? [...chats].sort((a,b)=>new Date(b.lastMessage?.createdAt??0)-new Date(a.lastMessage?.createdAt??0)).map(c=>withPresence(viewConversation(viewed(c),user?.id),visibleOnline,typing[c.id],knownPresence)) : [],draft:owned ? drafts[active]??'' : '',setDraft,send,retry,direct,older,markRead,group,add,remove,transfer,leave,loading,loadingOlder,network,error,reloadHistory:()=>setHistoryVersion(v=>v+1),
     reload:()=>{const token=scope.current;return refresh(token).catch(err=>{if(scope.current===token)report(err);});},clearDrafts};
 }

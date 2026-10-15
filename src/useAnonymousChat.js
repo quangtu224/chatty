@@ -86,6 +86,7 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
     try {
       const result=await sendAnonymousMessage(message.conversationId, {
         sessionId:message.sessionId,clientMessageId:message.clientMessageId,body:message.body,
+        kind:message.kind,gifId:message.gifId??null,
       });
       if(scope.current===token) merge(result.message);
     } catch(err) {
@@ -98,15 +99,15 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
       if(err.code==='stale_session'||err.code==='peer_offline')refresh(message.conversationId);
     }
   }
-  function send() {
+  function send(gif) {
     const room=current.current[active];
     if(room?.state.status!=='active')return callbacks.current.notify('Temporary session ended. Nothing was saved.','!');
-    const body=room.draft.trim(), error=messageBodyError(body);
+    const body=gif?.title||room.draft.trim(), error=messageBodyError(body);
     if(error)return callbacks.current.notify(error,'!');
     const id=crypto.randomUUID();
     setDraft('');
     transmit({id,conversationId:active,sessionId:room.state.sessionId,clientMessageId:id,
-      senderId:user.id,body,kind:'text',createdAt:new Date().toISOString()});
+      senderId:user.id,body,kind:gif?'gif':'text',gifId:gif?.id??null,createdAt:new Date().toISOString()});
   }
   function retry(id) {
     const message=current.current[active]?.messages.find(m=>m.id===id);
@@ -123,5 +124,6 @@ export default function useAnonymousChat(user, active, notify, onExpired) {
   const room=rooms[active], temporary=room?.state.status==='active';
   const chat=temporary ? {...viewConversation({id:active,type:'direct',messages:room.messages,hasMore:false},user?.id),temporary:true,
     readers:room.state.readers.map(r=>({id:r.userId,lastReadSeq:r.lastReadSeq}))} : null;
-  return {receive,action,refresh,state:room?.state,ready:!!room,temporary,chat,draft:room?.draft??'',setDraft,send,retry,markRead};
+  const invitations=Object.values(rooms).map(r=>r.state).filter(s=>s.status==='pending'&&s.requestedBy!==user?.id);
+  return {receive,action,refresh,invitations,state:room?.state,ready:!!room,temporary,chat,draft:room?.draft??'',setDraft,send,retry,markRead};
 }

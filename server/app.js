@@ -91,6 +91,7 @@ export function createApp({
   // onRead(userId, conversationId, lastReadSeq).
   onGroupChanged = async () => {},
   onRead = async () => {},
+  onProfile = async () => {},
   isUserOnline = () => false,
   onAnonymousState = async () => {},
   onAnonymousMessage = async () => {},
@@ -243,6 +244,8 @@ export function createApp({
        WHERE id = $1 RETURNING ${USER_COLUMNS}`,
       [req.user.id, displayName?.trim() ?? null, avatarId ?? null],
     );
+    // A failed push must not turn an already saved profile into a misleading HTTP failure.
+    try { await onProfile(toUser(rows[0])); } catch { console.error({code:'profile_push_failed'}); }
     res.json({ user: toUser(rows[0]) });
   });
 

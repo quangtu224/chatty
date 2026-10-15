@@ -25,13 +25,26 @@ self.addEventListener('message',event=>{
     if(clients.some(c=>c.focused&&c.visibilityState==='visible'&&views.get(c.id)?.accountId===data.accountId&&
       views.get(c.id)?.conversationId===data.conversationId))return;
     const {accountId,conversationId,sessionId,eventId,temporary,invitation}=data;
-    await self.registration.showNotification('Chatty',{
-      body:invitation?'You received a temporary chat invitation':temporary?'New temporary message':'You have a new message',
-      tag:`chatty:${accountId}:${conversationId}`,icon:'/avatars/owl.svg',
+    const name=typeof data.senderName==='string'?data.senderName.slice(0,40):'Chatty';
+    const title=invitation?`${name} · Temporary invitation`:temporary?`${name} · Temporary chat`:
+      data.roomName?`${name} · ${data.roomName}`:name;
+    const tag=`chatty:${accountId}:${conversationId}`;
+    await self.registration.showNotification(title,{
+      body:invitation?'Invited you to a temporary chat':temporary?'New temporary message':
+        typeof data.body==='string'?data.body.slice(0,200):'You have a new message',
+      tag,icon:'/avatars/owl.svg',requireInteraction:true,
       data:{accountId,conversationId,sessionId,eventId,temporary,invitation},
     });
+    return {tag,eventId};
   });
-  queue=job;event.waitUntil(job.catch(()=>{}));
+  queue=job;
+  // Keep the worker alive for this deadline without blocking the next notification.
+  event.waitUntil(job.then(async notice=>{
+    if(!notice)return;
+    await new Promise(resolve=>setTimeout(resolve,15000));
+    for(const n of await self.registration.getNotifications({tag:notice.tag}))
+      if(n.data?.eventId===notice.eventId)n.close(); // An older timer must not close its replacement.
+  }).catch(()=>{}));
 });
 self.addEventListener('notificationclick',event=>{
   event.notification.close();

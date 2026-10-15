@@ -31,10 +31,11 @@ export default function App() {
   const liveChat=useLiveChat(mode==='live'?user:null,active,notify,endSession,(id,name)=>{
     if(active===id){setActive(null);setMobileChat(false);setModal(null);setConfirmation(null);}
     notify(`You’re no longer in ${name}.`,'!');
-  },anonymous.receive,{incoming:notifications.incoming,profile:(p,live=true)=>{
+  },anonymous.receive,{incoming:incomingNotification,profile:(p,live=true)=>{
     if(live&&p.id===user?.id)profileRevision.current++;
     setUser(u=>u?.id===p.id?{...u,...p}:u);
   }});
+  function incomingNotification(type,payload){notifications.incoming(type,payload,liveChat.chats.find(c=>c.id===payload.conversationId));}
   const chat=liveChat.chats.find(c=>c.id===active);
   const temporary=chat?.type==='direct'&&anonymous.temporary;
   const displayedChat=temporary?{...chat,...anonymous.chat,name:chat.name,avatar:chat.avatar,peer:chat.peer,historyError:'',historyLoading:false,

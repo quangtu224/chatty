@@ -42,7 +42,7 @@ export default function Chat({
   const [away, setAway] = useState(false);
   const [readerMessage,setReaderMessage]=useState(null);
   const [gifDismissed,setGifDismissed]=useState(false);
-  const gifCommand=!chat?.temporary && /^\/gif(?:\s|$)/.test(draft.trimStart()) ? draft.trimStart().slice(4).trim() : null;
+  const gifCommand=/^\/gif(?:\s|$)/.test(draft.trimStart()) ? draft.trimStart().slice(4).trim() : null;
   const gifQuery=gifDismissed ? null : gifCommand;
   useLayoutEffect(() => {
     preserve.current = null;

@@ -7,11 +7,12 @@ export default [
   // Generated output, private tests/notes and static assets are not linted.
   {
     ignores: [
-      "node_modules/**", "dist/**", "design/**", "docs/**", "public/**",
+      "node_modules/**", "dist/**", "design/**", "docs/**", "public/avatars/**",
       ".local-backups/**", ".playwright-mcp/**", "tests/**", "**/*.test.js", "**/*.spec.js",
     ],
   },
   js.configs.recommended,
+  {files:["public/notifications-sw.js"],languageOptions:{globals:globals.serviceworker}},
   // Server and scripts run in Node; `_`-prefixed arguments/errors may stay unused.
   {
     files: ["**/*.{js,mjs,jsx}"],

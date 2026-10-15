@@ -13,10 +13,11 @@ Every signed-in user can browse/search all open rooms and join one (up to 20 mem
 - Global room discovery, self-service Join, owner management and realtime access revocation.
 - Consensual, memory-only anonymous DMs; either participant can end the temporary session.
 - Visible-chat read cursors, Seen/Unseen and group reader lists; presence across tabs and expiring typing indicators.
+- Opt-in browser notifications for live messages/invitations and realtime profile updates across contacts and own tabs.
 - Multi-page reconnect/gap recovery, account-scoped drafts and sign-out cleanup.
 - Same-origin frontend/API/WebSockets in a non-root Docker image; local gated releases, SHA-aware health and GitHub CI.
 
-M1–M4 are implemented. M5 provides Docker/local releases and GitHub CI; Render hosts `main` with Supabase PostgreSQL. The hosted baseline at af8733d includes username-only auth, demo removal, public rooms and temporary DMs; the owner confirmed signup works after making email nullable. The latest GIF autocomplete, presence, temporary-UI and typing/read-receipt improvements are locally verified feature branches pending deployment. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
+M1–M4 are implemented. M5 provides Docker/local releases and GitHub CI; Render hosts `main` with Supabase PostgreSQL. Interaction-polish changes were merged at `0214fdf`; the hosted revision has not been reverified. This feature branch adds temporary GIFs, browser notifications, invitation alerts, a temporary-mode switch and realtime profile updates. See [operations and recovery](docs/OPERATIONS.md) for release, rollback, backup and verification limits.
 
 ## Quick start
 
@@ -71,11 +72,21 @@ M2c connects live teammate search, direct conversations, message history, sends 
 
 ### Temporary anonymous DMs
 
-In a direct conversation, choose **Go temporary**. Both people must be connected; the other person must explicitly accept within 60 seconds. A compact status strip shows the invitation or session deadline; **How temporary chat works** opens the privacy details. Names, avatars and presence stay visible as usual. The session uses text only, for up to 30 minutes. Either person can end it. Normal history is hidden during the session and returns afterward.
+In a direct conversation, turn on the **Temporary chat** switch. Both people must be connected; it shows Waiting until the other person explicitly accepts within 60 seconds. Incoming invitations appear across the app with a button to open the correct DM; opening never accepts automatically. The switch is On only during a mutually accepted session, for up to 30 minutes. Either person can switch it off. A compact strip shows the deadline; **How temporary chat works** opens the privacy details. Names, avatars and presence stay visible. Normal history returns when the session ends.
 
 Temporary messages, consent and drafts stay in server/browser memory, never PostgreSQL, localStorage or sessionStorage. Normal sends are blocked server-side while the session is active. Losing either person's last socket, logout, expiry or a server restart ends it; disconnecting or reloading a tab clears its temporary content. Messages have no offline recovery. With multiple tabs, closing one tab leaves the session active if another remains connected. The UI and server retain the latest 200 messages/retry acknowledgements; retries outside that window may repeat a message.
 
 Typing and Seen/Unseen work in temporary DMs too. Temporary read cursors live only inside the active session; reading temporary text never advances normal message cursors. Names stay visible and no temporary bodies, drafts or read history are written to SQL.
+
+Temporary DMs support text and `/gif <keyword>` with the same ten-result picker. GIF IDs/titles travel only through the temporary route and stay in RAM; retries preserve the original media, and ending the session clears them. GIF image requests still go to Giphy, which receives the viewer's IP and may cache media. Memory-only history does not erase third-party/browser image caches.
+
+### Notifications and live profiles
+
+Choose **Enable notifications** in the sidebar and allow the browser permission prompt. Notifications require HTTPS (or localhost), a supported browser and an open, connected app. New DM/group/temporary messages and temporary invitations can notify while another chat/tab is in use; a focused chat suppresses its notifications. Opening a notification focuses the app and selects that conversation; it never accepts an invitation. All notification bodies are generic, including temporary messages. Turning notifications off is account-scoped on this browser and synchronizes across open tabs. Denied permission leaves chat and in-app invitations usable; change permission in browser site settings to enable it later.
+
+The notification service worker handles display/clicks only: no Web Push subscription, offline cache or message-content storage. Closing the app or suspending its socket prevents new notifications. Browser/OS settings can suppress display; mobile support depends on the browser's notification/install requirements. The worker keeps a bounded 200-event deduplication set in RAM; it is reset if the browser restarts the worker.
+
+After a profile save, public name/avatar updates reach the account's other sessions and current DM/group contacts through authorized Socket.IO events. Sidebar, message authors, headers, member lists and readers update without reload. Reconnect refreshes profile data. No private account fields are broadcast.
 
 This mode avoids persistent history; it does not hide your identity from your existing contact or server, prevent screenshots, or provide end-to-end encryption. Deploy only one backend instance: in-memory consent, delivery and locking are not shared across processes.
 

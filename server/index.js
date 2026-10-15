@@ -70,6 +70,7 @@ if (import.meta.main) {
       await realtime.publishConversation(id, revoked);
     },
     onRead: (userId, id, seq) => realtime.publishRead(userId, id, seq),
+    onProfile: profile => realtime.publishProfile(profile.id),
     isUserOnline: id => realtime.isOnline(id),
     onAnonymousState: (state, users) => realtime.publishAnonymousState(state, users),
     onAnonymousMessage: (message, users) => realtime.publishAnonymousMessage(message, users),

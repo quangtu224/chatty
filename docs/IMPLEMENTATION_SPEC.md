@@ -1,6 +1,6 @@
 # Chatty Implementation Specification
 
-Updated: 2026-10-14. The hosted main baseline af8733d includes username auth, public rooms and consensual temporary DMs; the owner confirmed signup works after the email-null schema update. New stacked branches provide GIF autocomplete10, presence synchronization, real-name temporary UI, and typing/read receipts for direct/group/temporary chat. These interaction improvements have local verification and are not deployed. They reuse existing read-state columns and require no new migration.
+Updated: 2026-10-15. Interaction polish was merged at main commit0214fdf; the hosted revision has not been reverified. This feature branch adds temporary GIFs, opt-in Notifications API alerts, app-wide invitations, a temporary-mode switch and realtime public profile updates. It reuses existing database columns and requires no new migration. Ship frontend/backend together.
 
 ## 1. Outcome and constraints
 
@@ -54,7 +54,7 @@ Normal drafts live in tab session storage keyed by user/conversation. Temporary 
 
 ### GIF messages
 
-Typing `/gif <query>` in normal chat automatically opens a picker with up to10 safe Giphy results (`rating=g`) after a 400ms debounce. Keep the composer editable and retain input focus on search completion. Clear old results/errors when the keyword changes; ignore late replies. Arrow down/Enter focuses a result; click/Enter sends it. Escape dismisses the current picker and keeps the draft; editing reopens search. An empty query shows a hint. The Giphy key lives only on the server (`GIPHY_API_KEY`); the browser calls `GET /api/v1/gifs`, never Giphy's API. Temporary DMs are text only and do not open this picker.
+Typing `/gif <query>` in normal or temporary chat automatically opens a picker with up to10 safe Giphy results (`rating=g`) after a 400ms debounce. Keep the composer editable and retain input focus on search completion. Clear old results/errors when the keyword changes; ignore late replies. Arrow down/Enter focuses a result; click/Enter sends it. Escape dismisses the current picker and keeps the draft; editing reopens search. An empty query shows a hint. The Giphy key lives only on the server (`GIPHY_API_KEY`); the browser calls `GET /api/v1/gifs`, never Giphy's API. Temporary picks must call the dedicated temporary send route, never the durable route.
 
 A GIF message stores `kind = 'gif'`, a Giphy ID (`^[A-Za-z0-9]+$`) and the title as `body` (alt text). Clients render `https://media.giphy.com/media/<id>/giphy.gif` built from the ID; arbitrary stored URLs are never rendered. Retry/idempotency rules match text messages. Viewers' browsers load images from Giphy, which therefore sees their IP addresses; README discloses this. Giphy outages or quota errors return `gif_unavailable` without affecting text chat.
 
@@ -72,11 +72,17 @@ Presence snapshots are authoritative and refreshed on connect, direct creation a
 
 Direct conversations only. The requester consents by requesting; only the other participant may accept the exact current request ID. Both require an authenticated socket. Pending requests expire after 60 seconds; active sessions expire after 30 minutes. Either can decline/cancel/end. Losing either participant's last socket, auth expiry/logout or server restart ends the session. One remaining tab preserves server consent; disconnect clears that tab's memory.
 
-Use dedicated temporary send routes and socket events, never the durable message route. Serialize consent transitions and all sends per conversation; block durable sends while active. Temporary bodies, consent, acknowledgements, read cursors and drafts remain in RAM; use `Cache-Control: no-store`. Clear them on end/disconnect/logout, reject stale session IDs and ignore late replies/events. No automatic fallback, offline recovery or GIF media in this mode. Retry preserves the original body/key within the latest 200 server acknowledgement records; UI displays at most 200 temporary messages. Normal history/drafts remain separate and return afterward. Temporary read updates are session-scoped and monotonic, never updating persistent membership cursors; typing uses the existing authenticated member-only socket hint. Sent means pushed to connected sessions; Seen reflects the same visibility/bottom rules as normal chat.
+Use dedicated temporary send routes and socket events, never the durable message route. Serialize consent transitions and all sends per conversation; block durable sends while active. Temporary bodies, GIF IDs/titles, consent, acknowledgements, read cursors and drafts remain in RAM; use `Cache-Control: no-store`. Clear them on end/disconnect/logout, reject stale session IDs and ignore late replies/events. No automatic fallback or offline recovery. Apply the durable route's text/Giphy-ID validation to temporary media; arbitrary URLs are rejected. Retry preserves the original body/kind/GIF ID/key within the latest 200 server acknowledgement records; UI displays at most 200 temporary messages. Giphy/browser media caches are outside this history guarantee. Normal history/drafts remain separate and return afterward. Temporary read updates are session-scoped and monotonic, never updating persistent membership cursors; typing uses the existing authenticated member-only socket hint. Sent means pushed to connected sessions; Seen reflects the same visibility/bottom rules as normal chat.
 
-Keep real peer names, avatars and presence in the header and messages. Use a compact moss-colored invitation/active-session strip with contextual Go temporary/Accept/Decline/End session actions and the expiry time. Privacy details live in a collapsible disclosure; the visible strip states that messages disappear. This mode does not conceal existing contact identities from the peer/server or prevent screenshots; no end-to-end encryption. One backend instance is required because consent and message locks live in its memory.
+Keep real peer names, avatars and presence in the header and messages. Use a compact moss-colored strip with an accessible sliding switch (Off/Waiting/On), contextual Accept/Decline/Cancel actions and expiry time. Requesting does not turn the switch On; both must consent. Either participant can turn an active session Off. Incoming invitations appear outside the current chat with an Open action, without automatic acceptance. Privacy details live in a collapsible disclosure; the visible strip states that messages disappear. This mode does not conceal existing contact identities from the peer/server or prevent screenshots; no end-to-end encryption. One backend instance is required because consent and message locks live in its memory.
 
-Excluded: video/voice, uploads, WASM, AI, push notifications, message-content search, message edit/delete, OAuth, verified email, recovery and end-to-end encryption.
+### Browser notifications and profile synchronization
+
+Account-scoped opt-in button requests Notifications permission only on a user click. A small service worker displays generic live-message/invitation notifications, suppresses the focused conversation and deduplicates up to200 events in RAM across tabs. Its click handler focuses the matching account's app and selects the DM/group, never accepting consent. No chat bodies/GIF titles enter notification payloads or persistent browser storage. Clear temporary notifications on state transitions and account notifications on sign-out/disable. Unsupported/denied permission never blocks chat; opt-in preference is the only new localStorage value. No Web Push, subscription database or closed-app delivery.
+
+Profile PATCH commits first, then publishes current public profiles only to unexpired sessions of the owner and users sharing a conversation. Serialize publications and read current profile/recipients together. Push failure does not fail an already committed save. Clients update own-account state and overlay profiles in peers, members and readers, preserving read cursors despite old HTTP responses. Reconnect refreshes own/list profiles. No database migration or private fields in events.
+
+Excluded: video/voice, uploads, WASM, AI, closed-app Web Push, message-content search, message edit/delete, OAuth, verified email, recovery and end-to-end encryption.
 
 ## 4. Architecture and file map
 
@@ -151,7 +157,7 @@ REST prefix `/api/v1`; errors `{ error: { code, message, fieldErrors? }, request
 | `POST /conversations/:id/messages` | Send `{ clientMessageId, body }`: 201 new, 200 canonical duplicate |
 | `GET /conversations/:id/anonymous` | Member-only current temporary state; groups rejected |
 | `POST /conversations/:id/anonymous` | `{ action: request/accept/decline/stop, id? }`; exact current request/session ID required except request |
-| `POST /conversations/:id/anonymous/messages` | `{ sessionId, clientMessageId, body }`; RAM-only text delivery and retry |
+| `POST /conversations/:id/anonymous/messages` | `{ sessionId, clientMessageId, body, kind?: text/gif, gifId? }`; RAM-only delivery and canonical retry |
 | `PUT /conversations/:id/anonymous/read` | `{ sessionId, seq }`; RAM-only monotonic cursor within the current session, returns updated state |
 | `GET /gifs?query=` | Authenticated, rate-limited Giphy search proxy |
 

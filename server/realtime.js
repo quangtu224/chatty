@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Server } from "socket.io";
-import { parseCookies, SESSION_COOKIE } from "./auth.js";
+import { parseCookies, SESSION_COOKIE, toUser } from "./auth.js";
 
 // Match the existing session table: raw cookie tokens never become room names.
 const tokenHash = (token) => createHash("sha256").update(token).digest();
@@ -77,6 +77,7 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
   // ponytail: in-memory, one server process only; move to Redis/an adapter when scaling out.
   const sockets = new Map();
   let presenceQueue=Promise.resolve(),closing=false;
+  let profileQueue=Promise.resolve();
   // Keep connect/disconnect and membership snapshots in order; delayed SQL cannot win later.
   function queuePresence(work){presenceQueue=presenceQueue.then(()=>closing?undefined:work()).catch(()=>console.error({code:'presence_push_failed'}));return presenceQueue;}
   async function snapshot(userId, socket){
@@ -153,6 +154,19 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
 
   return {
     isOnline: userId => sockets.has(userId),
+    publishProfile(userId) {
+      // Read current public values and current recipients together; serialize concurrent saves.
+      const job=profileQueue.catch(()=>{}).then(async()=>{
+        const {rows}=await pool.query(`SELECT s.token_hash,u.id,u.handle,u.display_name,u.avatar_id
+          FROM chatty.sessions s JOIN chatty.users u ON u.id=$1
+          WHERE s.expires_at>now() AND (s.user_id=$1 OR EXISTS (
+            SELECT 1 FROM chatty.conversation_members mine JOIN chatty.conversation_members other
+            ON other.conversation_id=mine.conversation_id
+            WHERE mine.user_id=$1 AND other.user_id=s.user_id))`,[userId]);
+        if(rows.length)io.to(rows.map(r=>sessionRoom(r.token_hash))).emit('profile:updated',toUser(rows[0]));
+      });
+      profileQueue=job;return job;
+    },
     publishAnonymousState: (state, users) => emitTo(USER_SESSIONS_SQL, [users], 'anonymous:state', state),
     publishAnonymousMessage: (message, users) => emitTo(USER_SESSIONS_SQL, [users], 'anonymous:message', message),
     async publishMessage(message) {
@@ -197,7 +211,8 @@ export function createRealtime(server, { pool, appOrigin, onUserOffline = async 
     close() {
       // Socket.IO closes its sockets and the attached HTTP server; disconnect clears timers.
       closing=true;
-      return new Promise((resolve, reject) => io.close((err) => err ? reject(err) : resolve())).then(()=>presenceQueue);
+      return new Promise((resolve, reject) => io.close((err) => err ? reject(err) : resolve()))
+        .then(()=>Promise.allSettled([presenceQueue,profileQueue]));
     },
   };
 }

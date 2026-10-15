@@ -13,16 +13,20 @@ export default function AnonymousControls({state,userId,peerName,onAction,online
       </div>
     </div>
     <div className="temporary-actions">
+      <button type="button" role="switch" aria-label="Temporary chat" aria-checked={active} className={`temporary-switch ${active?'is-on':''}`}
+        disabled={!state||!online||pending} onClick={()=>onAction(active?'stop':'request')}>
+        <span className="switch-track"><span/></span><span>{active?'On':pending?'Waiting':'Off'}</span>
+      </button>
       {!state?<button className="text-button" onClick={()=>onRefresh()}>Refresh session</button>
-        :active?<button className="btn btn-outline-secondary" aria-label="End temporary session" onClick={()=>onAction('stop')}>End session</button>
+        :active?null
         :pending?<>
           {!mine&&<button className="btn btn-primary" aria-label="Accept temporary chat" disabled={!online} onClick={()=>onAction('accept')}>Accept</button>}
           <button className="btn btn-outline-secondary" onClick={()=>onAction('decline')}>{mine?'Cancel request':'Decline'}</button>
-        </>:<button className="btn btn-outline-secondary" aria-label="Request anonymous DM" disabled={!online} onClick={()=>onAction('request')}>Go temporary</button>}
+        </>:null}
     </div>
     <details className="temporary-privacy">
       <summary>How temporary chat works</summary>
-      <p>Both people must be online and agree. Text and drafts stay in memory for up to 30 minutes; they are never saved to the database or browser storage. Either person can end the session. Disconnecting clears this tab; losing either person's last connection ends it. Your normal history returns afterward. Names stay visible. This is not end-to-end encryption.</p>
+      <p>Both people must be online and agree. Messages, GIF references and drafts stay in memory for up to 30 minutes; they are never saved to the database or browser storage. GIF images load from Giphy, which can receive your IP address and cache images. Either person can end the session. Disconnecting clears this tab; losing either person's last connection ends it. Your normal history returns afterward. Names stay visible. This is not end-to-end encryption.</p>
     </details>
   </section>;
 }

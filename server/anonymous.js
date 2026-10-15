@@ -61,12 +61,15 @@ export function createAnonymous({pool,auth,limit,isOnline,onState,onMessage,requ
     const state=publicState(s);await publish(state,users);res.json({state});
   }));
   router.post('/conversations/:id/anonymous/messages',limit,route(async(req,res)=>{
-    const id=req.params.id,users=await members(id,req.user.id),s=sessions.get(id),{sessionId,clientMessageId,body}=req.body??{};
+    const id=req.params.id,users=await members(id,req.user.id),s=sessions.get(id),{sessionId,clientMessageId,body,kind='text',gifId=null}=req.body??{};
     if(!s||s.status!=='active'||s.sessionId!==sessionId)deny(409,'stale_session','Temporary session ended. This message was not saved.');
     assertOnline(users);
     if(typeof clientMessageId!=='string'||!UUID.test(clientMessageId)||messageBodyError(body))deny(400,'validation_failed','Use a message ID and 1–4000 nonblank characters.');
+    // Temporary media uses the same ID allowlist as durable chat, never arbitrary URLs.
+    if(!['text','gif'].includes(kind)||(kind==='gif'?typeof gifId!=='string'||!/^[A-Za-z0-9]{1,100}$/.test(gifId):gifId!==null))
+      deny(400,'validation_failed','Choose text or a valid Giphy ID.');
     const key=`${req.user.id}:${clientMessageId}`,existing=s.messages.get(key);
-    const record=existing??{message:{id:randomUUID(),conversationId:id,sessionId,clientMessageId,senderId:req.user.id,seq:++s.seq,kind:'text',body,gifId:null,createdAt:new Date().toISOString()},delivered:false};
+    const record=existing??{message:{id:randomUUID(),conversationId:id,sessionId,clientMessageId,senderId:req.user.id,seq:++s.seq,kind,body,gifId,createdAt:new Date().toISOString()},delivered:false};
     s.messages.set(key,record);
     // shortcut: keep 200 retry acknowledgements per temporary session; expand if older retries are needed.
     if(s.messages.size>200)s.messages.delete(s.messages.keys().next().value);
